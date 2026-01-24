@@ -1,17 +1,25 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Space_Grotesk, Nabla, Bakbak_One } from "next/font/google";
 import "./globals.css";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
   subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const nabla = Nabla({
+  variable: "--font-nabla",
   subsets: ["latin"],
+  weight: ["400"],
+});
+
+const bakbakOne = Bakbak_One({
+  variable: "--font-bakbak-one",
+  subsets: ["latin"],
+  weight: ["400"],
 });
 
 export const metadata: Metadata = {
@@ -27,7 +35,8 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black min-h-screen flex flex-col`}
+        className={`${spaceGrotesk.variable} ${nabla.variable} ${bakbakOne.variable} antialiased bg-black min-h-screen flex flex-col font-sans`}
+        style={{ fontFamily: 'var(--font-space-grotesk)' }}
       >
         <Navbar />
         <main className="flex-1">
