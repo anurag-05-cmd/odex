@@ -1,0 +1,39 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_28-3dfc37f2c673e1a1601fe1c8617393d376d69c1d",
+  "solcVersion": "0.8.28",
+  "solcLongVersion": "0.8.28+commit.7893614a",
+  "userSourceNameMap": {
+    "contracts/Odex.sol": "project/contracts/Odex.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "cancun",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode",
+            "evm.deployedBytecode",
+            "evm.methodIdentifiers",
+            "metadata"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/Odex.sol": {
+        "content": "// SPDX-License-Identifier: MIT\r\npragma solidity ^0.8.19;\r\n\r\ncontract Odex {\r\n\r\n    enum State { Created, BuyerStaked, Active, Released, Completed, Cancelled }\r\n\r\n    struct Trade {\r\n        uint256 tradeId;\r\n        address payable seller;\r\n        address payable buyer;\r\n        uint256 price;\r\n        uint256 sellerStake;\r\n        uint256 buyerStake;\r\n        uint256 activationTime;\r\n        State state;\r\n    }\r\n\r\n    mapping(uint256 => Trade) public trades;\r\n    uint256 public tradeCounter;\r\n\r\n    event ListingCreated(uint256 indexed tradeId, address seller, uint256 price);\r\n    event BuyerStaked(uint256 indexed tradeId, address buyer, uint256 amount);\r\n    event Active(uint256 indexed tradeId, uint256 timestamp);\r\n    event ItemReleased(uint256 indexed tradeId);\r\n    event TradeCompleted(uint256 indexed tradeId);\r\n    event Refunded(uint256 indexed tradeId, string reason);\r\n\r\n    modifier onlySeller(uint256 _tradeId) {\r\n        require(msg.sender == trades[_tradeId].seller, \"Only seller can call this\");\r\n        _;\r\n    }\r\n\r\n    modifier onlyBuyer(uint256 _tradeId) {\r\n        require(msg.sender == trades[_tradeId].buyer, \"Only buyer can call this\");\r\n        _;\r\n    }\r\n\r\n    modifier inState(uint256 _tradeId, State _state) {\r\n        require(trades[_tradeId].state == _state, \"Invalid state for this action\");\r\n        _;\r\n    }\r\n\r\n    function createListing(uint256 _price) external {\r\n        tradeCounter++;\r\n        trades[tradeCounter] = Trade({\r\n            tradeId: tradeCounter,\r\n            seller: payable(msg.sender),\r\n            buyer: payable(address(0)),\r\n            price: _price,\r\n            sellerStake: 0,\r\n            buyerStake: 0,\r\n            activationTime: 0,\r\n            state: State.Created\r\n        });\r\n\r\n        emit ListingCreated(tradeCounter, msg.sender, _price);\r\n    }\r\n\r\n    function buyerDeposit(uint256 _tradeId) external payable inState(_tradeId, State.Created) {\r\n        Trade storage trade = trades[_tradeId];\r\n        require(msg.value == trade.price * 2, \"Must stake exactly 2x the price\");\r\n\r\n        trade.buyer = payable(msg.sender);\r\n        trade.buyerStake = msg.value;\r\n        trade.state = State.BuyerStaked;\r\n\r\n        emit BuyerStaked(_tradeId, msg.sender, msg.value);\r\n    }\r\n\r\n    function sellerDeposit(uint256 _tradeId) external payable onlySeller(_tradeId) inState(_tradeId, State.BuyerStaked) {\r\n        Trade storage trade = trades[_tradeId];\r\n        require(msg.value == (trade.price * 3) / 2, \"Must stake exactly 1.5x the price\");\r\n\r\n        trade.sellerStake = msg.value;\r\n        trade.activationTime = block.timestamp;\r\n        trade.state = State.Active;\r\n\r\n        emit Active(_tradeId, block.timestamp);\r\n    }\r\n\r\n    function markItemReleased(uint256 _tradeId) external onlySeller(_tradeId) inState(_tradeId, State.Active) {\r\n        Trade storage trade = trades[_tradeId];\r\n        \r\n        require(block.timestamp <= trade.activationTime + 5 minutes, \"Timeout: 5 minutes passed, funds must be refunded\");\r\n\r\n        trade.state = State.Released;\r\n        emit ItemReleased(_tradeId);\r\n    }\r\n\r\n    function refundTimeout(uint256 _tradeId) external inState(_tradeId, State.Active) {\r\n        Trade storage trade = trades[_tradeId];\r\n        require(block.timestamp > trade.activationTime + 5 minutes, \"Wait for 5 minute timer to expire\");\r\n\r\n        trade.state = State.Cancelled;\r\n\r\n        address payable s = trade.seller;\r\n        address payable b = trade.buyer;\r\n        uint256 sStake = trade.sellerStake;\r\n        uint256 bStake = trade.buyerStake;\r\n\r\n    \r\n        trade.sellerStake = 0;\r\n        trade.buyerStake = 0;\r\n\r\n        (bool successS, ) = s.call{value: sStake}(\"\");\r\n        require(successS, \"Transfer to seller failed\");\r\n\r\n        (bool successB, ) = b.call{value: bStake}(\"\");\r\n        require(successB, \"Transfer to buyer failed\");\r\n\r\n        emit Refunded(_tradeId, \"Seller failed to release in 5 mins\");\r\n    }\r\n\r\n    function confirmDelivery(uint256 _tradeId) external onlyBuyer(_tradeId) inState(_tradeId, State.Released) {\r\n        Trade storage trade = trades[_tradeId];\r\n\r\n        trade.state = State.Completed;\r\n        \r\n        uint256 sellerPayout = trade.sellerStake + trade.price; \r\n        uint256 buyerRefund = trade.buyerStake - trade.price;\r\n\r\n        trade.sellerStake = 0;\r\n        trade.buyerStake = 0;\r\n\r\n        (bool successS, ) = trade.seller.call{value: sellerPayout}(\"\");\r\n        require(successS, \"Transfer to seller failed\");\r\n\r\n        (bool successB, ) = trade.buyer.call{value: buyerRefund}(\"\");\r\n        require(successB, \"Transfer to buyer failed\");\r\n\r\n        emit TradeCompleted(_tradeId);\r\n    }\r\n    \r\n    function emergencyWithdrawBuyer(uint256 _tradeId) external onlyBuyer(_tradeId) inState(_tradeId, State.BuyerStaked) {\r\n        Trade storage trade = trades[_tradeId];\r\n        trade.state = State.Cancelled;\r\n        uint256 amount = trade.buyerStake;\r\n        \r\n        trade.buyerStake = 0;\r\n\r\n        (bool success, ) = trade.buyer.call{value: amount}(\"\");\r\n        require(success, \"Transfer failed\");\r\n        \r\n        emit Refunded(_tradeId, \"Buyer withdrew before Seller staked\");\r\n    }\r\n}"
+      }
+    }
+  }
+}
