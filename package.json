@@ -11,6 +11,11 @@
   "dependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@nomicfoundation/hardhat-verify": "^3.0.8",
+    "@reown/appkit": "^1.8.17",
+    "@reown/appkit-adapter-ethers": "^1.8.17",
+    "@reown/walletkit": "^1.5.0",
+    "@walletconnect/core": "^2.23.4",
+    "@walletconnect/utils": "^2.23.4",
     "next": "16.1.4",
     "react": "19.2.3",
     "react-dom": "19.2.3"
@@ -31,7 +36,7 @@
     "dotenv": "^17.2.3",
     "eslint": "^9",
     "eslint-config-next": "16.1.4",
-    "ethers": "^6.14.0",
+    "ethers": "^6.16.0",
     "forge-std": "foundry-rs/forge-std#v1.9.4",
     "hardhat": "^3.1.5",
     "mocha": "^11.0.0",
