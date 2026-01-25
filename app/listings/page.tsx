@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ethers } from "ethers";
+import { CONTRACT_ADDRESS, CONTRACT_ABI, TRADE_STATES } from "../utils/constants";
+import { moderateListingContent } from "../utils/moderation";
 import { create } from '@storacha/client';
-import { CONTRACT_ADDRESS, CONTRACT_ABI, TRADE_STATES, IPFS_GATEWAYS } from "../utils/constants";
 import { useNotification } from "../contexts/NotificationContext";
 
 interface Listing {
@@ -14,9 +15,6 @@ interface Listing {
   category: string;
   status: "active" | "sold" | "cancelled" | "in_progress" | "can_relist";
   createdAt: string;
-  image?: string;
-  ipfsHash?: string;
-  metadataHash?: string;
   contractState: number;
 }
 
@@ -39,23 +37,19 @@ export default function Listings() {
   const [contract, setContract] = useState<ethers.Contract | null>(null);
   const [signer, setSigner] = useState<ethers.Signer | null>(null);
   const [userAddress, setUserAddress] = useState<string>("");
-  const [storageClient, setStorageClient] = useState<any>(null);
   const [notifications, setNotifications] = useState<string[]>([]);
+  const isSubmittingRef = useRef(false);
 
   const [formData, setFormData] = useState({
     title: "",
     description: "",
     price: "",
     category: "",
-    image: "",
   });
-
-  const [imagePreview, setImagePreview] = useState<string>("");
 
   // Initialize contract and IPFS client
   useEffect(() => {
     initializeContract();
-    initializeStoracha();
   }, []);
 
   // Load user's listings when contract is ready
@@ -157,40 +151,6 @@ export default function Listings() {
     }
   };
 
-  const initializeStoracha = async () => {
-    try {
-      const client = create();
-      setStorageClient(client);
-    } catch (error) {
-      console.error("Error initializing Storacha:", error);
-    }
-  };
-
-  const uploadToIPFS = async (file: File): Promise<string | null> => {
-    if (!storageClient) {
-      return null;
-    }
-    
-    try {
-      const cid = await storageClient.uploadFile(file);
-      return cid.toString();
-    } catch (error) {
-      return null;
-    }
-  };
-
-  const deleteFromIPFS = async (ipfsHash: string): Promise<boolean> => {
-    if (!storageClient) return false;
-    
-    try {
-      await storageClient.remove(ipfsHash);
-      return true;
-    } catch (error) {
-      console.error("Error deleting from IPFS:", error);
-      return false;
-    }
-  };
-
   const getTradeState = (state: number): { status: Listing['status'], displayText: string } => {
     switch (state) {
       case TRADE_STATES.CREATED: return { status: "active", displayText: "Active" };
@@ -200,18 +160,6 @@ export default function Listings() {
       case TRADE_STATES.COMPLETED: return { status: "sold", displayText: "Completed" };
       case TRADE_STATES.CANCELLED: return { status: "can_relist", displayText: "Can Relist" };
       default: return { status: "cancelled", displayText: "Cancelled" };
-    }
-  };
-
-  const loadMetadataFromIPFS = async (metadataHash: string): Promise<any> => {
-    if (!storageClient) return null;
-    
-    try {
-      const response = await fetch(`${IPFS_GATEWAYS[0]}${metadataHash}`);
-      const metadata = await response.json();
-      return metadata;
-    } catch (error) {
-      return null;
     }
   };
 
@@ -270,23 +218,23 @@ export default function Listings() {
             continue;
           }
           
-          // Try to load metadata from localStorage
-          const storedMetadata = localStorage.getItem(`listing_${i}`);
+          // Fetch metadata from contract
           let metadata = {
             title: `Trade #${i}`,
             description: `Listed item for trade`,
-            category: "General",
-            image: "",
-            metadataHash: ""
+            category: "General"
           };
           
-          if (storedMetadata) {
-            try {
-              const parsed = JSON.parse(storedMetadata);
-              metadata = { ...metadata, ...parsed };
-            } catch (e) {
-              // Error parsing metadata, continue with defaults
-            }
+          try {
+            const contractMetadata = await contract.getMetadata(i);
+            metadata = {
+              title: contractMetadata.itemName || `Trade #${i}`,
+              description: contractMetadata.itemDescription || `Listed item for trade`,
+              category: contractMetadata.category || "General"
+            };
+          } catch (e) {
+            // Error fetching metadata from contract, use defaults
+            console.error("Error fetching metadata for trade", i, e);
           }
           
           const listing: Listing = {
@@ -297,8 +245,6 @@ export default function Listings() {
             category: metadata.category,
             status,
             createdAt: new Date().toISOString().split("T")[0],
-            image: metadata.image,
-            metadataHash: metadata.metadataHash,
             contractState: tradeState
           };
           
@@ -317,33 +263,10 @@ export default function Listings() {
     if (listing.contractState !== TRADE_STATES.COMPLETED) return;
     
     try {
-      // Delete image from IPFS if exists
-      if (listing.ipfsHash) {
-        await deleteFromIPFS(listing.ipfsHash);
-      }
-      
-      // Delete metadata from IPFS if exists
-      if (listing.metadataHash) {
-        await deleteFromIPFS(listing.metadataHash);
-      }
-      
       // Remove from local state
       setListings(listings.filter(l => l.tradeId !== listing.tradeId));
     } catch (error) {
       console.error("Error deleting completed trade:", error);
-    }
-  };
-
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        setImagePreview(result);
-        setFormData({ ...formData, image: result });
-      };
-      reader.readAsDataURL(file);
     }
   };
 
@@ -379,26 +302,84 @@ export default function Listings() {
   const handleCreateListing = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Prevent concurrent submissions
+    if (isSubmittingRef.current) {
+      return;
+    }
+    isSubmittingRef.current = true;
+    
     if (!contract || !signer) {
+      alert("Please connect your wallet");
+      isSubmittingRef.current = false;
+      return;
+    }
+
+    // Validate form fields
+    if (!formData.title.trim()) {
+      alert("Please enter a title");
+      return;
+    }
+
+    if (!formData.description.trim()) {
+      alert("Please enter a description");
+      return;
+    }
+
+    if (!formData.category) {
+      alert("Please select a category");
+      return;
+    }
+
+    if (!formData.price || isNaN(parseFloat(formData.price))) {
+      alert("Please enter a valid price");
+      return;
+    }
+
+    const priceValue = parseFloat(formData.price);
+    if (priceValue <= 0) {
+      alert("Price must be greater than 0");
       showNotification("Please connect your wallet to create listings", "warning");
       return;
     }
 
     setLoading(true);
     try {
+      // Validate content with moderation API
+      const moderationResult = await moderateListingContent(
+        formData.title,
+        formData.description
+      );
+
+      if (moderationResult.flagged) {
+        alert(`Content blocked: ${moderationResult.message}\n\nReason: ${moderationResult.reason}`);
+        setLoading(false);
+        isSubmittingRef.current = false;
+        return;
+      }
+
       // Convert price to wei
       const priceInWei = ethers.parseEther(formData.price);
       
       // Estimate gas first to catch any contract errors
       try {
-        const gasEstimate = await contract.createListing.estimateGas(priceInWei);
+        const gasEstimate = await contract.createListing.estimateGas(
+          priceInWei,
+          formData.title,
+          formData.description,
+          formData.category
+        );
       } catch (gasError: any) {
         throw new Error(`Transaction will fail: ${gasError.reason || gasError.message}`);
       }
 
       // Create listing on blockchain with retry
       const tx = await sendTransactionWithRetry(() => 
-        contract.createListing(priceInWei)
+        contract.createListing(
+          priceInWei,
+          formData.title,
+          formData.description,
+          formData.category
+        )
       );
       
       const receipt = await tx.wait();
@@ -411,6 +392,7 @@ export default function Listings() {
       // Get the new trade ID from the contract
       const newTradeId = await contract.tradeCounter();
       
+      // Metadata is now stored on-chain via contract, no need for localStorage
       // Store metadata in localStorage for persistence
       const metadata = {
         title: formData.title,
@@ -429,9 +411,12 @@ export default function Listings() {
       showNotification("Listing created successfully! Buyers can now purchase your item.", "success");
 
       // Reset form
-      setFormData({ title: "", description: "", price: "", category: "", image: "" });
-      setImagePreview("");
+      setFormData({ title: "", description: "", price: "", category: "" });
       setActiveTab("myListings");
+      
+      // Reload listings
+      await loadUserListings();
+      isSubmittingRef.current = false;
       
     } catch (error: any) {
       
@@ -467,6 +452,7 @@ export default function Listings() {
       else {
         showNotification(error.message || "An unexpected error occurred. Please try again.", "error");
       }
+      isSubmittingRef.current = false;
     }
     setLoading(false);
   };
@@ -892,47 +878,6 @@ export default function Listings() {
               
               <form onSubmit={handleCreateListing} className="space-y-6">
                 <div>
-                  <label className="block text-white font-semibold mb-2">Item Image</label>
-                  <div className="space-y-4">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageChange}
-                      className="hidden"
-                      id="image-upload"
-                    />
-                    <label
-                      htmlFor="image-upload"
-                      className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-white/10 rounded-lg cursor-pointer hover:border-[#70ff00]/50 transition-colors bg-black/50"
-                    >
-                      {imagePreview ? (
-                        <img src={imagePreview} alt="Preview" className="w-full h-full object-cover rounded-lg" />
-                      ) : (
-                        <div className="text-center">
-                          <svg className="w-12 h-12 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                          </svg>
-                          <p className="text-gray-400 text-sm">Click to upload image</p>
-                          <p className="text-gray-500 text-xs mt-1">PNG, JPG up to 10MB</p>
-                        </div>
-                      )}
-                    </label>
-                    {imagePreview && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setImagePreview("");
-                          setFormData({ ...formData, image: "" });
-                        }}
-                        className="text-red-400 text-sm hover:text-red-300 transition-colors"
-                      >
-                        Remove image
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div>
                   <label className="block text-white font-semibold mb-2">Item Title</label>
                   <input
                     type="text"
@@ -1046,27 +991,6 @@ export default function Listings() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {listings.map((listing) => (
                   <div key={listing.tradeId} className="bg-white/[0.02] border border-white/5 rounded-xl overflow-hidden backdrop-blur-sm hover:border-[#70ff00]/30 transition-all duration-300">
-                    {listing.image && (
-                      <div className="w-full h-48 overflow-hidden bg-black/50">
-                        <img 
-                          src={listing.image.startsWith('ipfs://') ? `${IPFS_GATEWAYS[0]}${listing.image.slice(7)}` : listing.image}
-                          alt={listing.title}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            // Try fallback IPFS gateways if first one fails
-                            const img = e.target as HTMLImageElement;
-                            if (listing.image?.startsWith('ipfs://')) {
-                              const hash = listing.image.slice(7);
-                              const currentGateway = img.src.split('/ipfs/')[0] + '/ipfs/';
-                              const currentIndex = IPFS_GATEWAYS.indexOf(currentGateway);
-                              if (currentIndex < IPFS_GATEWAYS.length - 1) {
-                                img.src = `${IPFS_GATEWAYS[currentIndex + 1]}${hash}`;
-                              }
-                            }
-                          }}
-                        />
-                      </div>
-                    )}
                     <div className="p-6">
                       <div className="flex items-start justify-between mb-4">
                         <span className={`px-3 py-1 rounded-full text-xs font-semibold ${

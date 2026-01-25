@@ -16,10 +16,17 @@ contract Odex {
         State state;
     }
 
+    struct Metadata {
+        string itemName;
+        string itemDescription;
+        string category;
+    }
+
     mapping(uint256 => Trade) public trades;
+    mapping(uint256 => Metadata) public tradeMetadata;
     uint256 public tradeCounter;
 
-    event ListingCreated(uint256 indexed tradeId, address seller, uint256 price);
+    event ListingCreated(uint256 indexed tradeId, address seller, uint256 price, string itemName, string category);
     event BuyerStaked(uint256 indexed tradeId, address buyer, uint256 amount);
     event Active(uint256 indexed tradeId, uint256 timestamp);
     event ItemReleased(uint256 indexed tradeId);
@@ -41,7 +48,12 @@ contract Odex {
         _;
     }
 
-    function createListing(uint256 _price) external {
+    function createListing(
+        uint256 _price,
+        string memory _itemName,
+        string memory _itemDescription,
+        string memory _category
+    ) external {
         tradeCounter++;
         trades[tradeCounter] = Trade({
             tradeId: tradeCounter,
@@ -54,7 +66,17 @@ contract Odex {
             state: State.Created
         });
 
-        emit ListingCreated(tradeCounter, msg.sender, _price);
+        tradeMetadata[tradeCounter] = Metadata({
+            itemName: _itemName,
+            itemDescription: _itemDescription,
+            category: _category
+        });
+
+        emit ListingCreated(tradeCounter, msg.sender, _price, _itemName, _category);
+    }
+
+    function getMetadata(uint256 _tradeId) external view returns (Metadata memory) {
+        return tradeMetadata[_tradeId];
     }
 
     function buyerDeposit(uint256 _tradeId) external payable inState(_tradeId, State.Created) {

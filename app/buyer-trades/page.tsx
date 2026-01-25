@@ -174,8 +174,7 @@ export default function BuyerTrades() {
         console.log("Trade state:", tradeState);
         console.log("Price:", ethers.formatEther(rawTrade.price), "ETH");
         
-        // Try to load metadata from localStorage
-        const storedMetadata = localStorage.getItem(`listing_${i}`);
+        // Fetch metadata from contract
         let metadata = {
           title: `Trade #${i}`,
           description: "Listed item",
@@ -183,14 +182,17 @@ export default function BuyerTrades() {
           image: "",
         };
         
-        if (storedMetadata) {
-          try {
-            const parsed = JSON.parse(storedMetadata);
-            metadata = { ...metadata, ...parsed };
-            console.log("Loaded metadata from localStorage:", metadata);
-          } catch (e) {
-            console.error("Error parsing metadata for trade", i, e);
-          }
+        try {
+          const contractMetadata = await contract.getMetadata(i);
+          metadata = {
+            title: contractMetadata.itemName || `Trade #${i}`,
+            description: contractMetadata.itemDescription || "Listed item",
+            category: contractMetadata.category || "General",
+            image: "",
+          };
+          console.log("Loaded metadata from contract:", metadata);
+        } catch (e) {
+          console.error("Error fetching metadata for trade", i, e);
         }
         
         const { status, displayText } = getBuyerTradeStatus(tradeState);
