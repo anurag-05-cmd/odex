@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import { create } from '@storacha/client';
 import { CONTRACT_ADDRESS, CONTRACT_ABI, TRADE_STATES, IPFS_GATEWAYS } from "../utils/constants";
+import { useNotification } from "../contexts/NotificationContext";
 
 interface Listing {
   tradeId: string;
@@ -31,7 +32,8 @@ interface Trade {
 }
 
 export default function Listings() {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "create" | "myListings">("dashboard");
+  const { showNotification } = useNotification();
+  const [activeTab, setActiveTab] = useState<"dashboard" | "create" | "myListings" | "pendingActions">("dashboard");
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(false);
   const [contract, setContract] = useState<ethers.Contract | null>(null);
@@ -61,13 +63,21 @@ export default function Listings() {
     if (contract && userAddress) {
       loadUserListings();
       checkForNotifications();
+      
+      // Auto-refresh every 30 seconds to keep data current
+      const intervalId = setInterval(() => {
+        loadUserListings();
+        checkForNotifications();
+      }, 30000);
+      
+      return () => clearInterval(intervalId);
     }
   }, [contract, userAddress]);
 
   const initializeContract = async () => {
     try {
       if (typeof window === 'undefined') {
-        alert("This application requires a browser environment");
+        showNotification("This feature requires a web browser. Please use a desktop or mobile browser.", "error");
         return;
       }
 
@@ -96,7 +106,7 @@ export default function Listings() {
       }
 
       if (!provider) {
-        alert("MetaMask not detected. Please install MetaMask and refresh the page.");
+        showNotification("MetaMask wallet not found. Please install MetaMask browser extension to continue.", "warning");
         return;
       }
 
@@ -105,7 +115,7 @@ export default function Listings() {
       const userSigner = await provider.getSigner();
       
       if (!CONTRACT_ADDRESS) {
-        alert("Contract address not configured. Please check your environment variables.");
+        showNotification("Unable to connect to smart contract. Please check configuration.", "error");
         return;
       }
       
@@ -134,15 +144,15 @@ export default function Listings() {
       console.error("Error initializing contract:", error);
       
       if (error.code === 4001) {
-        alert("Please connect your wallet to continue");
+        showNotification("Please connect your wallet to continue", "warning");
       } else if (error.code === "NETWORK_ERROR" || error.message?.includes("network")) {
-        alert("Network error. Please check your connection and try again.");
+        showNotification("Network connection issue. Please check your internet and try again.", "error");
       } else if (error.message?.includes("could not coalesce")) {
-        alert("Connection issue detected. Please refresh the page and try again.");
+        showNotification("Connection problem detected. Please refresh the page.", "error");
       } else if (error.message?.includes("Failed to connect to contract")) {
-        alert(error.message);
+        showNotification(error.message || "An unexpected error occurred", "error");
       } else {
-        alert(`Error: ${error.message || "Unknown error occurred"}`);
+        showNotification(error.message || "An unexpected error occurred. Please try again.", "error");
       }
     }
   };
@@ -370,7 +380,7 @@ export default function Listings() {
     e.preventDefault();
     
     if (!contract || !signer) {
-      alert("Please connect your wallet");
+      showNotification("Please connect your wallet to create listings", "warning");
       return;
     }
 
@@ -392,6 +402,11 @@ export default function Listings() {
       );
       
       const receipt = await tx.wait();
+      
+      // Wait for transaction to be mined
+      if (receipt.status === 0) {
+        throw new Error("Transaction failed");
+      }
 
       // Get the new trade ID from the contract
       const newTradeId = await contract.tradeCounter();
@@ -401,27 +416,28 @@ export default function Listings() {
         title: formData.title,
         description: formData.description,
         category: formData.category,
-        image: formData.image, // base64 for now, will be IPFS hash later
+        image: formData.image,
         createdAt: new Date().toISOString()
       };
       
       localStorage.setItem(`listing_${newTradeId}`, JSON.stringify(metadata));
 
-      alert("Listing created successfully!");
+      // Reload listings first
+      await loadUserListings();
+      
+      // Then show success notification
+      showNotification("Listing created successfully! Buyers can now purchase your item.", "success");
 
       // Reset form
       setFormData({ title: "", description: "", price: "", category: "", image: "" });
       setImagePreview("");
       setActiveTab("myListings");
       
-      // Reload listings
-      await loadUserListings();
-      
     } catch (error: any) {
       
       // Check if user rejected
       if (error.code === 4001 || error.code === "ACTION_REJECTED") {
-        alert("Transaction cancelled by user");
+        showNotification("Transaction cancelled. No changes were made.", "warning");
       } 
       // Check if error message indicates user rejection
       else if (error.message && (
@@ -429,27 +445,27 @@ export default function Listings() {
         error.message.includes("User denied") ||
         error.message.includes("rejected the request")
       )) {
-        alert("Transaction cancelled by user");
+        showNotification("Transaction cancelled. No changes were made.", "warning");
       }
       // Transaction will fail (from gas estimation)
       else if (error.message && error.message.includes("Transaction will fail")) {
-        alert(error.message);
+        showNotification(error.message || "An unexpected error occurred", "error");
       }
       // Contract revert
       else if (error.reason) {
-        alert(`Transaction failed: ${error.reason}`);
+        showNotification(`Transaction failed: ${error.reason}`, "error");
       }
       // Network or RPC error  
       else if (error.code === "NETWORK_ERROR" || error.code === -32603) {
-        alert("Network error. Please check your connection and try again.");
+        showNotification("Network connection issue. Please check your internet and try again.", "error");
       }
       // Insufficient funds
       else if (error.code === "INSUFFICIENT_FUNDS") {
-        alert("Insufficient funds to pay for gas. Please add more ETH to your wallet.");
+        showNotification("Not enough ETH for transaction fees. Please add more ETH to your wallet.", "error");
       }
       // Generic error
       else {
-        alert(`Error: ${error.message || "Unknown error occurred"}`);
+        showNotification(error.message || "An unexpected error occurred. Please try again.", "error");
       }
     }
     setLoading(false);
@@ -484,9 +500,9 @@ export default function Listings() {
     } catch (error: any) {
       console.error("Error re-listing:", error);
       if (error.code === -32002 || error.message?.includes("too many errors")) {
-        alert("RPC endpoint overloaded. Please wait a moment and try again.");
+        showNotification("Network is busy. Please wait a moment and try again.", "error");
       } else {
-        alert("Error re-listing item. Please try again.");
+        showNotification("Failed to re-list item. Please try again.", "error");
       }
     }
     setLoading(false);
@@ -508,19 +524,19 @@ export default function Listings() {
       
       await tx.wait();
       
-      alert("Successfully staked! Trade is now active. Please release the item within 5 minutes.");
+      showNotification("Successfully staked! Trade is now active. Please release the item within 5 minutes.", "success");
       await loadUserListings();
       await checkForNotifications();
     } catch (error: any) {
       console.error("Error staking as seller:", error);
       if (error.code === 4001) {
-        alert("Transaction cancelled");
+        showNotification("Transaction cancelled. No changes were made.", "warning");
       } else if (error.code === -32002 || error.message?.includes("too many errors")) {
-        alert("RPC endpoint overloaded. Please wait a moment and try again.");
+        showNotification("Network is busy. Please wait a moment and try again.", "error");
       } else if (error.reason) {
-        alert(`Failed: ${error.reason}`);
+        showNotification(`Operation failed: ${error.reason}`, "error");
       } else {
-        alert(`Failed to stake: ${error.message || "Please try again."}`);
+        showNotification(`Failed to stake. Please try again.`, "error");
       }
     }
     setLoading(false);
@@ -537,17 +553,17 @@ export default function Listings() {
       
       await tx.wait();
       
-      alert("Item released! Waiting for buyer to confirm delivery.");
+      showNotification("Item released! Waiting for buyer to confirm delivery.", "success");
       await loadUserListings();
       await checkForNotifications();
     } catch (error: any) {
       console.error("Error releasing item:", error);
       if (error.code === -32002 || error.message?.includes("too many errors")) {
-        alert("RPC endpoint overloaded. Please wait a moment and try again.");
+        showNotification("Network is busy. Please wait a moment and try again.", "error");
       } else if (error.reason) {
-        alert(`Failed: ${error.reason}`);
+        showNotification(`Operation failed: ${error.reason}`, "error");
       } else {
-        alert(`Failed to release item: ${error.message || "Please try again."}`);
+        showNotification(`Failed to release item. Please try again.`, "error");
       }
     }
     setLoading(false);
@@ -564,17 +580,17 @@ export default function Listings() {
       
       await tx.wait();
       
-      alert("Delivery confirmed! Trade completed successfully.");
+      showNotification("Delivery confirmed! Trade completed successfully.", "success");
       await loadUserListings();
       await checkForNotifications();
     } catch (error: any) {
       console.error("Error confirming delivery:", error);
       if (error.code === -32002 || error.message?.includes("too many errors")) {
-        alert("RPC endpoint overloaded. Please wait a moment and try again.");
+        showNotification("Network is busy. Please wait a moment and try again.", "error");
       } else if (error.reason) {
-        alert(`Failed: ${error.reason}`);
+        showNotification(`Operation failed: ${error.reason}`, "error");
       } else {
-        alert(`Failed to confirm delivery: ${error.message || "Please try again."}`);
+        showNotification(`Failed to confirm delivery. Please try again.`, "error");
       }
     }
     setLoading(false);
@@ -591,17 +607,17 @@ export default function Listings() {
       
       await tx.wait();
       
-      alert("Refund processed due to timeout.");
+      showNotification("Refund processed successfully due to timeout.", "success");
       await loadUserListings();
       await checkForNotifications();
     } catch (error: any) {
       console.error("Error requesting refund:", error);
       if (error.code === -32002 || error.message?.includes("too many errors")) {
-        alert("RPC endpoint overloaded. Please wait a moment and try again.");
+        showNotification("Network is busy. Please wait a moment and try again.", "error");
       } else if (error.reason) {
-        alert(`Failed: ${error.reason}`);
+        showNotification(`Operation failed: ${error.reason}`, "error");
       } else {
-        alert(`Failed to process refund: ${error.message || "Please wait for 5 minutes after seller staked."}`);
+        showNotification(`Failed to process refund. Please try again.`, "error");
       }
     }
     setLoading(false);
@@ -643,15 +659,15 @@ export default function Listings() {
   }
 
   return (
-    <div className="min-h-screen bg-black relative overflow-hidden px-6 py-32">
+    <div className="min-h-screen bg-black relative overflow-hidden px-4 sm:px-6 py-24 sm:py-32">
       {/* Background effects */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-purple-900/10 via-black to-black"></div>
       <div className="absolute bottom-20 left-20 w-[400px] h-[400px] bg-[#70ff00]/3 rounded-full blur-[100px]"></div>
       
       <div className="relative max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-3 sm:mb-4">
             My <span className="text-[#70ff00]">Listings</span>
           </h1>
           <p className="text-gray-400">Manage your listings and track your trading activity</p>
@@ -672,10 +688,10 @@ export default function Listings() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-8 overflow-x-auto">
+        <div className="flex gap-2 mb-6 sm:mb-8 overflow-x-auto pb-2 scrollbar-hide">
           <button
             onClick={() => setActiveTab("dashboard")}
-            className={`px-6 py-3 rounded-lg font-semibold transition-all duration-300 whitespace-nowrap ${
+            className={`px-4 sm:px-6 py-2 sm:py-3 rounded-lg font-semibold transition-all duration-300 whitespace-nowrap text-sm sm:text-base ${
               activeTab === "dashboard"
                 ? "bg-[#70ff00] text-black"
                 : "bg-white/5 text-white hover:bg-white/10 border border-white/10"
@@ -702,6 +718,16 @@ export default function Listings() {
             }`}
           >
             My Listings ({listings.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("pendingActions")}
+            className={`px-6 py-3 rounded-lg font-semibold transition-all duration-300 whitespace-nowrap ${
+              activeTab === "pendingActions"
+                ? "bg-[#70ff00] text-black"
+                : "bg-white/5 text-white hover:bg-white/10 border border-white/10"
+            }`}
+          >
+            Pending Actions
           </button>
         </div>
 
@@ -786,11 +812,83 @@ export default function Listings() {
           </div>
         )}
 
+        {/* Pending Actions Tab */}
+        {activeTab === "pendingActions" && (
+          <div className="space-y-6">
+            {loading ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#70ff00] mx-auto"></div>
+                <p className="text-gray-400 mt-4">Loading pending actions...</p>
+              </div>
+            ) : listings.filter(l => l.status === "in_progress").length === 0 ? (
+              <div className="bg-white/[0.02] border border-white/5 rounded-xl p-12 backdrop-blur-sm text-center">
+                <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-white mb-2">No pending actions</h3>
+                <p className="text-gray-400">All your listings are either active or completed</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {listings.filter(l => l.status === "in_progress").map((listing) => (
+                  <div key={listing.tradeId} className="bg-gradient-to-br from-orange-500/5 to-orange-500/[0.02] border-2 border-orange-500/30 rounded-xl overflow-hidden backdrop-blur-sm">
+                    {listing.image && (
+                      <div className="w-full h-48 overflow-hidden bg-black/50 relative">
+                        <img 
+                          src={listing.image.startsWith('ipfs://') 
+                            ? IPFS_GATEWAYS[0] + listing.image.slice(7) 
+                            : listing.image}
+                          alt={listing.title}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute top-3 right-3 px-3 py-1 bg-orange-500/90 backdrop-blur-sm rounded-full text-xs font-semibold text-white">
+                          ACTION REQUIRED
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div className="p-6">
+                      <h3 className="text-xl font-bold text-white mb-2">{listing.title}</h3>
+                      <p className="text-gray-400 text-sm mb-4 line-clamp-2">{listing.description}</p>
+                      
+                      <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-4 mb-4">
+                        <p className="text-orange-400 font-semibold text-sm mb-2">🔔 Buyer has staked!</p>
+                        <p className="text-gray-300 text-xs">You need to stake 1.5x ({(parseFloat(listing.price) * 1.5).toFixed(3)} ETH) to activate this trade.</p>
+                      </div>
+                      
+                      <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10">
+                        <div>
+                          <p className="text-gray-400 text-xs mb-1">Price</p>
+                          <p className="text-[#70ff00] font-bold text-lg">{listing.price} ETH</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-gray-400 text-xs mb-1">Your Stake Needed</p>
+                          <p className="text-orange-400 font-semibold">{(parseFloat(listing.price) * 1.5).toFixed(3)} ETH</p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleSellerDeposit(listing)}
+                        disabled={loading}
+                        className="w-full px-4 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-semibold transition-all duration-300 disabled:opacity-50"
+                      >
+                        {loading ? "Processing..." : "Stake & Activate Trade"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Create Listing Tab */}
         {activeTab === "create" && (
           <div className="max-w-3xl mx-auto">
-            <div className="bg-white/[0.02] border border-white/5 rounded-xl p-8 backdrop-blur-sm">
-              <h2 className="text-2xl font-bold text-white mb-6">Create New Listing</h2>
+            <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 sm:p-6 md:p-8 backdrop-blur-sm">
+              <h2 className="text-xl sm:text-2xl font-bold text-white mb-4 sm:mb-6">Create New Listing</h2>
               
               <form onSubmit={handleCreateListing} className="space-y-6">
                 <div>
@@ -1052,7 +1150,101 @@ export default function Listings() {
             )}
           </div>
         )}
+
+        {/* Pending Actions Tab - Items where buyer has staked */}
+        {activeTab === "pendingActions" && (
+          <div className="space-y-6">
+            {loading ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#70ff00] mx-auto"></div>
+                <p className="text-gray-400 mt-4">Loading pending actions...</p>
+              </div>
+            ) : listings.filter(l => l.contractState === TRADE_STATES.BUYER_STAKED || l.contractState === TRADE_STATES.ACTIVE).length === 0 ? (
+              <div className="bg-white/[0.02] border border-white/5 rounded-xl p-12 backdrop-blur-sm text-center">
+                <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-white mb-2">No pending actions</h3>
+                <p className="text-gray-400">Items requiring your attention will appear here</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {listings.filter(l => l.contractState === TRADE_STATES.BUYER_STAKED || l.contractState === TRADE_STATES.ACTIVE).map((listing) => (
+                  <div key={listing.tradeId} className="bg-gradient-to-br from-orange-500/10 to-orange-500/[0.02] border-2 border-orange-500/40 rounded-xl overflow-hidden backdrop-blur-sm">
+                    {listing.image && (
+                      <div className="w-full h-48 overflow-hidden bg-black/50 relative">
+                        <img 
+                          src={listing.image.startsWith('ipfs://') ? `${IPFS_GATEWAYS[0]}${listing.image.slice(7)}` : listing.image}
+                          alt={listing.title}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute top-3 right-3 px-3 py-1 bg-orange-500 backdrop-blur-sm rounded-full text-xs font-semibold text-white">
+                          🔔 ACTION REQUIRED
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div className="p-6">
+                      <h3 className="text-xl font-bold text-white mb-2">{listing.title}</h3>
+                      <p className="text-gray-400 text-sm mb-4 line-clamp-2">{listing.description}</p>
+                      
+                      {listing.contractState === TRADE_STATES.BUYER_STAKED && (
+                        <>
+                          <div className="bg-orange-500/20 border border-orange-500/40 rounded-lg p-4 mb-4">
+                            <p className="text-orange-400 font-semibold text-sm mb-2">💰 Buyer Has Staked!</p>
+                            <p className="text-gray-300 text-xs">Stake 1.5x to activate this trade and ship the item.</p>
+                          </div>
+                          
+                          <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10">
+                            <div>
+                              <p className="text-gray-400 text-xs mb-1">Price</p>
+                              <p className="text-[#70ff00] font-bold text-lg">{listing.price} ETH</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-gray-400 text-xs mb-1">Stake Needed</p>
+                              <p className="text-orange-400 font-semibold">{(parseFloat(listing.price) * 1.5).toFixed(3)} ETH</p>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => handleSellerDeposit(listing)}
+                            disabled={loading}
+                            className="w-full px-4 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-semibold transition-all duration-300 disabled:opacity-50"
+                          >
+                            {loading ? "Processing..." : "Stake & Activate"}
+                          </button>
+                        </>
+                      )}
+
+                      {listing.contractState === TRADE_STATES.ACTIVE && (
+                        <>
+                          <div className="bg-blue-500/20 border border-blue-500/40 rounded-lg p-4 mb-4">
+                            <p className="text-blue-400 font-semibold text-sm mb-2">📦 Release Item</p>
+                            <p className="text-gray-300 text-xs">Both parties have staked. Release the item within 5 minutes.</p>
+                          </div>
+                          
+                          <button
+                            onClick={() => handleReleaseItem(listing)}
+                            disabled={loading}
+                            className="w-full px-4 py-3 bg-[#70ff00] text-black rounded-lg font-semibold transition-all duration-300 hover:bg-[#70ff00]/80 disabled:opacity-50"
+                          >
+                            {loading ? "Processing..." : "Release Item"}
+                          </button>
+                          <p className="text-red-400 text-xs text-center mt-2">⚠️ Buyer can request refund after 5 minutes</p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+

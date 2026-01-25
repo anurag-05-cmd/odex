@@ -3,6 +3,7 @@ import { Space_Grotesk, Nabla, Exo_2 } from "next/font/google";
 import "./globals.css";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
+import { NotificationProvider } from "./contexts/NotificationContext";
 
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-space-grotesk",
@@ -38,11 +39,13 @@ export default function RootLayout({
         className={`${spaceGrotesk.variable} ${nabla.variable} ${exo2.variable} antialiased bg-black min-h-screen flex flex-col font-sans`}
         style={{ fontFamily: 'var(--font-space-grotesk)' }}
       >
-        <Navbar />
-        <main className="flex-1">
-          {children}
-        </main>
-        <Footer />
+        <NotificationProvider>
+          <Navbar />
+          <main className="flex-1">
+            {children}
+          </main>
+          <Footer />
+        </NotificationProvider>
       </body>
     </html>
   );

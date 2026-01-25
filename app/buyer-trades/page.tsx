@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import { CONTRACT_ADDRESS, CONTRACT_ABI, TRADE_STATES, IPFS_GATEWAYS } from "../utils/constants";
+import { useNotification } from "../contexts/NotificationContext";
 
 interface Trade {
   tradeId: string;
@@ -30,6 +31,7 @@ interface RawTrade {
 }
 
 export default function BuyerTrades() {
+  const { showNotification } = useNotification();
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(false);
   const [contract, setContract] = useState<ethers.Contract | null>(null);
@@ -215,7 +217,7 @@ export default function BuyerTrades() {
       setTrades(buyerTradesList);
     } catch (error) {
       console.error("Error loading buyer trades:", error);
-      alert("Error loading your active stakes. Please try again.");
+      showNotification("Failed to load your purchases. Please refresh the page.", "error");
     }
     setLoading(false);
   };
@@ -232,14 +234,14 @@ export default function BuyerTrades() {
       await tx.wait();
       console.log("✅ Delivery confirmed");
       
-      alert("✅ Delivery confirmed! Trade completed successfully.");
+      showNotification("Delivery confirmed successfully! Trade is now complete and your funds have been released.", "success");
       await loadBuyerTrades();
     } catch (error: any) {
       console.error("Error confirming delivery:", error);
       if (error.reason) {
-        alert(`❌ Failed: ${error.reason}`);
+        showNotification(`Failed to confirm delivery: ${error.reason}. Please try again.`, "error");
       } else {
-        alert("❌ Failed to confirm delivery. Please try again.");
+        showNotification("Failed to confirm delivery. Please check your wallet and try again.", "error");
       }
     }
     setLoading(false);
@@ -257,14 +259,14 @@ export default function BuyerTrades() {
       await tx.wait();
       console.log("✅ Refund processed");
       
-      alert("✅ Refund processed due to timeout.");
+      showNotification("Refund processed successfully. Your stake has been returned to your wallet.", "success");
       await loadBuyerTrades();
     } catch (error: any) {
       console.error("Error requesting refund:", error);
       if (error.reason) {
-        alert(`❌ Failed: ${error.reason}`);
+        showNotification(`Refund request failed: ${error.reason}`, "error");
       } else {
-        alert("❌ Cannot request refund yet. Please wait for 5 minutes after seller staked.");
+        showNotification("Refund not available yet. Please wait at least 5 minutes after the seller stakes.", "warning");
       }
     }
     setLoading(false);
@@ -294,15 +296,15 @@ export default function BuyerTrades() {
   }
 
   return (
-    <div className="min-h-screen bg-black relative overflow-hidden px-6 py-32">
+    <div className="min-h-screen bg-black relative overflow-hidden px-4 sm:px-6 py-24 sm:py-32">
       {/* Background effects */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-purple-900/10 via-black to-black"></div>
       <div className="absolute top-20 left-20 w-[400px] h-[400px] bg-[#70ff00]/3 rounded-full blur-[100px]"></div>
       
       <div className="relative max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-3 sm:mb-4">
             My <span className="text-[#70ff00]">Active Stakes</span>
           </h1>
           <p className="text-gray-400">Track your purchases and confirm deliveries</p>
@@ -501,3 +503,4 @@ export default function BuyerTrades() {
     </div>
   );
 }
+

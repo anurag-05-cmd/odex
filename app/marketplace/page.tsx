@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import { CONTRACT_ADDRESS, CONTRACT_ABI, TRADE_STATES, IPFS_GATEWAYS } from "../utils/constants";
+import { useNotification } from "../contexts/NotificationContext";
 
 interface Listing {
   tradeId: string;
@@ -28,6 +29,7 @@ interface Trade {
 }
 
 export default function Marketplace() {
+  const { showNotification } = useNotification();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
@@ -176,7 +178,7 @@ export default function Marketplace() {
 
   const handleBuyerDeposit = async (listing: Listing) => {
     if (!contract || !userAddress) {
-      alert("Please connect your wallet first");
+      showNotification("Please connect your wallet to continue", "warning");
       await initializeContract();
       return;
     }
@@ -256,7 +258,7 @@ export default function Marketplace() {
       const result = await sendTransactionWithRetry(3);
       
       if (result && result.success) {
-        alert("✅ Successfully staked! Waiting for seller to confirm.");
+        showNotification("Purchase successful! Waiting for seller to confirm and ship your item.", "success");
         await loadMarketplaceListings();
         setSelectedListing(null);
       }
@@ -265,18 +267,33 @@ export default function Marketplace() {
     } catch (error: any) {
       console.error("=== TRANSACTION ERROR ===", error);
       
+      // User cancelled transaction
       if (error.code === 4001 || error.message?.includes("user rejected")) {
-        alert("❌ Transaction cancelled by user");
-      } else if (error.message?.includes("INSUFFICIENT_BALANCE")) {
-        alert("❌ " + error.message.replace("INSUFFICIENT_BALANCE: ", ""));
-      } else if (error.message?.includes("insufficient funds")) {
-        alert("❌ Insufficient funds for gas. Make sure you have enough ETH.");
-      } else if (error.code === -32603 || error.message?.includes("Internal error")) {
-        alert("❌ RPC error. Please refresh the page and try again.");
-      } else if (error.reason) {
-        alert(`❌ Transaction failed: ${error.reason}`);
-      } else {
-        alert(`❌ Transaction failed: ${error.message || "Unknown error"}`);
+        showNotification("Transaction cancelled. No funds were deducted.", "warning");
+      } 
+      // Insufficient balance for the stake
+      else if (error.message?.includes("INSUFFICIENT_BALANCE")) {
+        showNotification("Insufficient balance. You need enough ETH to cover the 2x stake amount.", "error");
+      } 
+      // Not enough ETH for gas fees
+      else if (error.message?.includes("insufficient funds")) {
+        showNotification("Not enough ETH to pay for transaction fees. Please add more ETH to your wallet.", "error");
+      } 
+      // RPC/Network errors
+      else if (error.code === -32603 || error.code === -32002 || error.message?.includes("Internal error") || error.message?.includes("too many errors")) {
+        showNotification("Network connection issue. Please check your internet and try again.", "error");
+      }
+      // Contract revert with reason
+      else if (error.reason) {
+        const humanReason = error.reason
+          .replace(/_/g, ' ')
+          .toLowerCase()
+          .replace(/\b\w/g, (l: string) => l.toUpperCase());
+        showNotification(`Transaction failed: ${humanReason}`, "error");
+      } 
+      // Generic error
+      else {
+        showNotification("Transaction failed. Please try again or contact support if the issue persists.", "error");
       }
     }
     setLoading(false);
@@ -311,22 +328,22 @@ export default function Marketplace() {
   }
 
   return (
-    <div className="min-h-screen bg-black relative overflow-hidden px-6 py-32">
+    <div className="min-h-screen bg-black relative overflow-hidden px-4 sm:px-6 py-24 sm:py-32">
       {/* Background effects */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-purple-900/10 via-black to-black"></div>
       <div className="absolute top-20 right-20 w-[400px] h-[400px] bg-[#70ff00]/3 rounded-full blur-[100px]"></div>
       
       <div className="relative max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-3 sm:mb-4">
             <span className="text-[#70ff00]">Marketplace</span>
           </h1>
           <p className="text-gray-400">Discover and trade items securely with dual-stake escrow</p>
         </div>
 
         {/* Search and Filter Bar */}
-        <div className="bg-white/[0.02] border border-white/5 rounded-xl p-6 backdrop-blur-sm mb-8">
+        <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 sm:p-6 backdrop-blur-sm mb-6 sm:mb-8">
           <div className="flex flex-col md:flex-row gap-4">
             {/* Search */}
             <div className="flex-1">
@@ -430,16 +447,13 @@ export default function Marketplace() {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-[#70ff00]/20 flex items-center justify-center">
-                        <svg className="w-3 h-3 text-[#70ff00]" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                        </svg>
-                      </div>
-                      <span className="text-gray-400 text-xs font-mono">{listing.seller.slice(0, 6)}...{listing.seller.slice(-4)}</span>
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-6 h-6 rounded-full bg-[#70ff00]/20 flex items-center justify-center">
+                      <svg className="w-3 h-3 text-[#70ff00]" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                      </svg>
                     </div>
-                    <span className="text-gray-500 text-xs">Trade #{listing.tradeId}</span>
+                    <span className="text-gray-400 text-xs font-mono">{listing.seller.slice(0, 6)}...{listing.seller.slice(-4)}</span>
                   </div>
 
                   <button
@@ -458,12 +472,12 @@ export default function Marketplace() {
 
       {/* Buy Modal */}
       {selectedListing && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6">
           <div className="bg-gradient-to-br from-white/10 to-white/5 border border-white/20 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-8">
+            <div className="p-4 sm:p-6 md:p-8">
               {/* Header */}
-              <div className="flex items-start justify-between mb-6">
-                <h2 className="text-3xl font-bold text-white">Confirm Purchase</h2>
+              <div className="flex items-start justify-between mb-4 sm:mb-6">
+                <h2 className="text-2xl sm:text-3xl font-bold text-white">Confirm Purchase</h2>
                 <button
                   onClick={closeBuyModal}
                   className="w-10 h-10 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
