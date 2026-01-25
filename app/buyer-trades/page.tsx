@@ -65,7 +65,7 @@ export default function BuyerTrades() {
       while (!provider && attempts < maxAttempts) {
         if (window.ethereum) {
           try {
-            provider = new ethers.BrowserProvider(window.ethereum);
+            provider = new ethers.BrowserProvider(window.ethereum as any);
             console.log("✓ Ethereum provider initialized (BuyerTrades)");
             break;
           } catch (err) {
