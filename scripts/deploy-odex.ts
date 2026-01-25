@@ -1,11 +1,25 @@
 import hre from "hardhat";
+import { ethers } from "ethers";
 
 async function main() {
   console.log("Deploying Odex contract...");
 
-  // Deploy the contract
-  const Odex = await hre.ethers.getContractFactory("Odex");
-  const odex = await Odex.deploy();
+  // Get contract artifact
+  const artifact = await hre.artifacts.readArtifact("Odex");
+  
+  // Create provider and wallet
+  const provider = new ethers.JsonRpcProvider(process.env.SEPOLIA_RPC_URL);
+  let privateKey = process.env.PRIVATE_KEY || "";
+  if (!privateKey.startsWith("0x")) {
+    privateKey = `0x${privateKey}`;
+  }
+  const wallet = new ethers.Wallet(privateKey, provider);
+  
+  console.log("Deploying with wallet:", wallet.address);
+
+  // Deploy contract
+  const factory = new ethers.ContractFactory(artifact.abi, artifact.bytecode, wallet);
+  const odex = await factory.deploy();
 
   await odex.waitForDeployment();
 
