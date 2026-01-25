@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
-import { CONTRACT_ADDRESS, CONTRACT_ABI, TRADE_STATES, IPFS_GATEWAYS } from "../utils/constants";
+import { CONTRACT_ADDRESS, CONTRACT_ABI, TRADE_STATES } from "../utils/constants";
 import { useNotification } from "../contexts/NotificationContext";
 
 interface Listing {
@@ -13,7 +13,6 @@ interface Listing {
   category: string;
   seller: string;
   createdAt: string;
-  image?: string;
   contractState: number;
 }
 
@@ -164,7 +163,6 @@ export default function Marketplace() {
             category: metadata.category,
             seller: trade.seller,
             createdAt: new Date().toISOString().split("T")[0],
-            image: metadata.image,
             contractState: tradeState
           };
           
@@ -415,27 +413,19 @@ export default function Marketplace() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredListings.map((listing) => {
-              const imageSrc = listing.image?.startsWith('ipfs://') 
-                ? IPFS_GATEWAYS[0] + listing.image.slice(7)
-                : listing.image;
-              
-              return (
+            {filteredListings.map((listing) => (
               <div key={listing.tradeId} className="bg-white/[0.02] border border-white/5 rounded-xl overflow-hidden backdrop-blur-sm hover:border-[#70ff00]/30 transition-all duration-300 group">
-                {listing.image && (
-                  <div className="w-full h-48 overflow-hidden bg-black/50 relative">
-                    <img 
-                      src={imageSrc}
-                      alt={listing.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                    <div className="absolute top-3 right-3 px-3 py-1 bg-black/80 backdrop-blur-sm rounded-full text-xs font-semibold text-[#70ff00]">
+                <div className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-12 h-12 rounded-full bg-[#70ff00]/10 flex items-center justify-center">
+                      <svg className="w-6 h-6 text-[#70ff00]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                      </svg>
+                    </div>
+                    <div className="px-3 py-1 bg-black/80 backdrop-blur-sm rounded-full text-xs font-semibold text-[#70ff00]">
                       {listing.category}
                     </div>
                   </div>
-                )}
-                
-                <div className="p-6">
                   <h3 className="text-xl font-bold text-white mb-2 line-clamp-1">{listing.title}</h3>
                   <p className="text-gray-400 text-sm mb-4 line-clamp-2">{listing.description}</p>
                   
@@ -467,8 +457,7 @@ export default function Marketplace() {
                   </button>
                 </div>
               </div>
-            );
-            })}
+            ))}
           </div>
         )}
       </div>
@@ -492,15 +481,11 @@ export default function Marketplace() {
               </div>
 
               {/* Listing Details */}
-              {selectedListing.image && (
-                <div className="w-full h-64 overflow-hidden rounded-xl mb-6 bg-black/50">
-                  <img 
-                    src={selectedListing.image} 
-                    alt={selectedListing.title}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              )}
+              <div className="w-full h-48 overflow-hidden rounded-xl mb-6 bg-gradient-to-br from-[#70ff00]/10 to-purple-500/10 flex items-center justify-center">
+                <svg className="w-20 h-20 text-[#70ff00]/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                </svg>
+              </div>
 
               <h3 className="text-2xl font-bold text-white mb-2">{selectedListing.title}</h3>
               <p className="text-gray-400 mb-6">{selectedListing.description}</p>

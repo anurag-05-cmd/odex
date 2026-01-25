@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import { ethers } from "ethers";
 import { CONTRACT_ADDRESS, CONTRACT_ABI, TRADE_STATES } from "../utils/constants";
 import { moderateListingContent } from "../utils/moderation";
-import { create } from '@storacha/client';
 import { useNotification } from "../contexts/NotificationContext";
 
 interface Listing {
@@ -398,7 +397,6 @@ export default function Listings() {
         title: formData.title,
         description: formData.description,
         category: formData.category,
-        image: formData.image,
         createdAt: new Date().toISOString()
       };
       
@@ -820,22 +818,17 @@ export default function Listings() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {listings.filter(l => l.status === "in_progress").map((listing) => (
                   <div key={listing.tradeId} className="bg-gradient-to-br from-orange-500/5 to-orange-500/[0.02] border-2 border-orange-500/30 rounded-xl overflow-hidden backdrop-blur-sm">
-                    {listing.image && (
-                      <div className="w-full h-48 overflow-hidden bg-black/50 relative">
-                        <img 
-                          src={listing.image.startsWith('ipfs://') 
-                            ? IPFS_GATEWAYS[0] + listing.image.slice(7) 
-                            : listing.image}
-                          alt={listing.title}
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute top-3 right-3 px-3 py-1 bg-orange-500/90 backdrop-blur-sm rounded-full text-xs font-semibold text-white">
+                    <div className="p-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="w-12 h-12 rounded-full bg-orange-500/20 flex items-center justify-center">
+                          <svg className="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                        </div>
+                        <div className="px-3 py-1 bg-orange-500/90 backdrop-blur-sm rounded-full text-xs font-semibold text-white">
                           ACTION REQUIRED
                         </div>
                       </div>
-                    )}
-                    
-                    <div className="p-6">
                       <h3 className="text-xl font-bold text-white mb-2">{listing.title}</h3>
                       <p className="text-gray-400 text-sm mb-4 line-clamp-2">{listing.description}</p>
                       
@@ -1097,20 +1090,17 @@ export default function Listings() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {listings.filter(l => l.contractState === TRADE_STATES.BUYER_STAKED || l.contractState === TRADE_STATES.ACTIVE).map((listing) => (
                   <div key={listing.tradeId} className="bg-gradient-to-br from-orange-500/10 to-orange-500/[0.02] border-2 border-orange-500/40 rounded-xl overflow-hidden backdrop-blur-sm">
-                    {listing.image && (
-                      <div className="w-full h-48 overflow-hidden bg-black/50 relative">
-                        <img 
-                          src={listing.image.startsWith('ipfs://') ? `${IPFS_GATEWAYS[0]}${listing.image.slice(7)}` : listing.image}
-                          alt={listing.title}
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute top-3 right-3 px-3 py-1 bg-orange-500 backdrop-blur-sm rounded-full text-xs font-semibold text-white">
+                    <div className="p-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="w-12 h-12 rounded-full bg-orange-500/20 flex items-center justify-center">
+                          <svg className="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                        </div>
+                        <div className="px-3 py-1 bg-orange-500 backdrop-blur-sm rounded-full text-xs font-semibold text-white">
                           🔔 ACTION REQUIRED
                         </div>
                       </div>
-                    )}
-                    
-                    <div className="p-6">
                       <h3 className="text-xl font-bold text-white mb-2">{listing.title}</h3>
                       <p className="text-gray-400 text-sm mb-4 line-clamp-2">{listing.description}</p>
                       

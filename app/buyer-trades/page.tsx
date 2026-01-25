@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
-import { CONTRACT_ADDRESS, CONTRACT_ABI, TRADE_STATES, IPFS_GATEWAYS } from "../utils/constants";
+import { CONTRACT_ADDRESS, CONTRACT_ABI, TRADE_STATES } from "../utils/constants";
 import { useNotification } from "../contexts/NotificationContext";
 
 interface Trade {
@@ -14,7 +14,6 @@ interface Trade {
   status: "waiting_seller" | "in_progress" | "released" | "completed" | "refunded";
   title: string;
   description: string;
-  image?: string;
   contractState: number;
   activationTime?: number;
 }
