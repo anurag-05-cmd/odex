@@ -205,7 +205,6 @@ export default function BuyerTrades() {
           status,
           title: metadata.title,
           description: metadata.description,
-          image: metadata.image,
           contractState: tradeState,
           activationTime: rawTrade.activationTime,
         };
