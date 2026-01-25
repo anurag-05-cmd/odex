@@ -24,7 +24,7 @@ const metadata = {
 const modal = createAppKit({
   adapters: [ethersAdapter],
   projectId,
-  networks: [mainnet, arbitrum, sepolia],
+  networks: [sepolia],
   defaultNetwork: sepolia,
   metadata,
   features: {

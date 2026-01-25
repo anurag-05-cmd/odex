@@ -4,30 +4,41 @@
 import type { BaseContract, BigNumberish, BytesLike, FunctionFragment, Result, Interface, EventFragment, AddressLike, ContractRunner, ContractMethod, Listener } from "ethers"
 import type { TypedContractEvent, TypedDeferredTopicFilter, TypedEventLog, TypedLogDescription, TypedListener, TypedContractMethod } from "./common.js"
   
+export declare namespace Odex {
+      
+    export type MetadataStruct = {itemName: string, itemDescription: string, category: string}
+
+    export type MetadataStructOutput = [itemName: string, itemDescription: string, category: string] & {itemName: string, itemDescription: string, category: string }
+  
+    }
 
   export interface OdexInterface extends Interface {
-    getFunction(nameOrSignature: "buyerDeposit" | "confirmDelivery" | "createListing" | "emergencyWithdrawBuyer" | "markItemReleased" | "refundTimeout" | "sellerDeposit" | "tradeCounter" | "trades"): FunctionFragment;
+    getFunction(nameOrSignature: "buyerDeposit" | "confirmDelivery" | "createListing" | "emergencyWithdrawBuyer" | "getMetadata" | "markItemReleased" | "refundTimeout" | "sellerDeposit" | "tradeCounter" | "tradeMetadata" | "trades"): FunctionFragment;
 
     getEvent(nameOrSignatureOrTopic: "Active" | "BuyerStaked" | "ItemReleased" | "ListingCreated" | "Refunded" | "TradeCompleted"): EventFragment;
 
     encodeFunctionData(functionFragment: 'buyerDeposit', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'confirmDelivery', values: [BigNumberish]): string;
-encodeFunctionData(functionFragment: 'createListing', values: [BigNumberish]): string;
+encodeFunctionData(functionFragment: 'createListing', values: [BigNumberish, string, string, string]): string;
 encodeFunctionData(functionFragment: 'emergencyWithdrawBuyer', values: [BigNumberish]): string;
+encodeFunctionData(functionFragment: 'getMetadata', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'markItemReleased', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'refundTimeout', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'sellerDeposit', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'tradeCounter', values?: undefined): string;
+encodeFunctionData(functionFragment: 'tradeMetadata', values: [BigNumberish]): string;
 encodeFunctionData(functionFragment: 'trades', values: [BigNumberish]): string;
 
     decodeFunctionResult(functionFragment: 'buyerDeposit', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'confirmDelivery', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'createListing', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'emergencyWithdrawBuyer', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'getMetadata', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'markItemReleased', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'refundTimeout', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'sellerDeposit', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'tradeCounter', data: BytesLike): Result;
+decodeFunctionResult(functionFragment: 'tradeMetadata', data: BytesLike): Result;
 decodeFunctionResult(functionFragment: 'trades', data: BytesLike): Result;
   }
 
@@ -69,9 +80,9 @@ decodeFunctionResult(functionFragment: 'trades', data: BytesLike): Result;
   
 
     export namespace ListingCreatedEvent {
-      export type InputTuple = [tradeId: BigNumberish, seller: AddressLike, price: BigNumberish];
-      export type OutputTuple = [tradeId: bigint, seller: string, price: bigint];
-      export interface OutputObject {tradeId: bigint, seller: string, price: bigint };
+      export type InputTuple = [tradeId: BigNumberish, seller: AddressLike, price: BigNumberish, itemName: string, category: string];
+      export type OutputTuple = [tradeId: bigint, seller: string, price: bigint, itemName: string, category: string];
+      export interface OutputObject {tradeId: bigint, seller: string, price: bigint, itemName: string, category: string };
       export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>
       export type Filter = TypedDeferredTopicFilter<Event>
       export type Log = TypedEventLog<Event>
@@ -155,7 +166,7 @@ decodeFunctionResult(functionFragment: 'trades', data: BytesLike): Result;
 
     
     createListing: TypedContractMethod<
-      [_price: BigNumberish, ],
+      [_price: BigNumberish, _itemName: string, _itemDescription: string, _category: string, ],
       [void],
       'nonpayable'
     >
@@ -166,6 +177,14 @@ decodeFunctionResult(functionFragment: 'trades', data: BytesLike): Result;
       [_tradeId: BigNumberish, ],
       [void],
       'nonpayable'
+    >
+    
+
+    
+    getMetadata: TypedContractMethod<
+      [_tradeId: BigNumberish, ],
+      [Odex.MetadataStructOutput],
+      'view'
     >
     
 
@@ -202,6 +221,14 @@ decodeFunctionResult(functionFragment: 'trades', data: BytesLike): Result;
     
 
     
+    tradeMetadata: TypedContractMethod<
+      [arg0: BigNumberish, ],
+      [[string, string, string] & {itemName: string, itemDescription: string, category: string }],
+      'view'
+    >
+    
+
+    
     trades: TypedContractMethod<
       [arg0: BigNumberish, ],
       [[bigint, string, string, bigint, bigint, bigint, bigint, bigint] & {tradeId: bigint, seller: string, buyer: string, price: bigint, sellerStake: bigint, buyerStake: bigint, activationTime: bigint, state: bigint }],
@@ -223,7 +250,7 @@ getFunction(nameOrSignature: 'confirmDelivery'): TypedContractMethod<
       'nonpayable'
     >;
 getFunction(nameOrSignature: 'createListing'): TypedContractMethod<
-      [_price: BigNumberish, ],
+      [_price: BigNumberish, _itemName: string, _itemDescription: string, _category: string, ],
       [void],
       'nonpayable'
     >;
@@ -231,6 +258,11 @@ getFunction(nameOrSignature: 'emergencyWithdrawBuyer'): TypedContractMethod<
       [_tradeId: BigNumberish, ],
       [void],
       'nonpayable'
+    >;
+getFunction(nameOrSignature: 'getMetadata'): TypedContractMethod<
+      [_tradeId: BigNumberish, ],
+      [Odex.MetadataStructOutput],
+      'view'
     >;
 getFunction(nameOrSignature: 'markItemReleased'): TypedContractMethod<
       [_tradeId: BigNumberish, ],
@@ -250,6 +282,11 @@ getFunction(nameOrSignature: 'sellerDeposit'): TypedContractMethod<
 getFunction(nameOrSignature: 'tradeCounter'): TypedContractMethod<
       [],
       [bigint],
+      'view'
+    >;
+getFunction(nameOrSignature: 'tradeMetadata'): TypedContractMethod<
+      [arg0: BigNumberish, ],
+      [[string, string, string] & {itemName: string, itemDescription: string, category: string }],
       'view'
     >;
 getFunction(nameOrSignature: 'trades'): TypedContractMethod<
@@ -279,7 +316,7 @@ getEvent(key: 'TradeCompleted'): TypedContractEvent<TradeCompletedEvent.InputTup
       ItemReleased: TypedContractEvent<ItemReleasedEvent.InputTuple, ItemReleasedEvent.OutputTuple, ItemReleasedEvent.OutputObject>;
     
 
-      'ListingCreated(uint256,address,uint256)': TypedContractEvent<ListingCreatedEvent.InputTuple, ListingCreatedEvent.OutputTuple, ListingCreatedEvent.OutputObject>;
+      'ListingCreated(uint256,address,uint256,string,string)': TypedContractEvent<ListingCreatedEvent.InputTuple, ListingCreatedEvent.OutputTuple, ListingCreatedEvent.OutputObject>;
       ListingCreated: TypedContractEvent<ListingCreatedEvent.InputTuple, ListingCreatedEvent.OutputTuple, ListingCreatedEvent.OutputObject>;
     
 

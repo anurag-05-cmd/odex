@@ -16,7 +16,9 @@ export const TRADE_STATES = {
 
 // Contract ABI
 export const CONTRACT_ABI = [
-  "function createListing(uint256 _price) external",
+  "function createListing(uint256 _price, string memory _itemName, string memory _itemDescription, string memory _category) external",
+  "function getMetadata(uint256 _tradeId) external view returns (tuple(string itemName, string itemDescription, string category))",
+  "function tradeMetadata(uint256) external view returns (string itemName, string itemDescription, string category)",
   "function trades(uint256) external view returns (uint256 tradeId, address seller, address buyer, uint256 price, uint256 sellerStake, uint256 buyerStake, uint256 activationTime, uint8 state)",
   "function tradeCounter() external view returns (uint256)",
   "function buyerDeposit(uint256 _tradeId) external payable",
@@ -25,7 +27,7 @@ export const CONTRACT_ABI = [
   "function confirmDelivery(uint256 _tradeId) external",
   "function emergencyWithdrawBuyer(uint256 _tradeId) external",
   "function refundTimeout(uint256 _tradeId) external",
-  "event ListingCreated(uint256 indexed tradeId, address seller, uint256 price)",
+  "event ListingCreated(uint256 indexed tradeId, address seller, uint256 price, string itemName, string category)",
   "event BuyerStaked(uint256 indexed tradeId, address buyer, uint256 amount)",
   "event Active(uint256 indexed tradeId, uint256 timestamp)",
   "event ItemReleased(uint256 indexed tradeId)",
