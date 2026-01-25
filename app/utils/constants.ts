@@ -2,7 +2,7 @@
 export const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "";
 
 // IPFS configuration
-export const STORACHA_KEY = "did:key:z6MkvYnR3oFwE7LbphK51ane2omHJssoBbE4AQVciXrbh7De";
+export const STORACHA_KEY = process.env.STORACHA_KEY || "";
 
 // Trade States
 export const TRADE_STATES = {
