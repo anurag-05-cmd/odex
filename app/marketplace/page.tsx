@@ -134,8 +134,7 @@ export default function Marketplace() {
         
         // Only show listings that are in "Created" state (available for purchase)
         if (tradeState === TRADE_STATES.CREATED) {
-          // Try to load metadata from localStorage
-          const storedMetadata = localStorage.getItem(`listing_${i}`);
+          // Fetch metadata from contract
           let metadata = {
             title: `Trade #${i}`,
             description: `Listed item for trade`,
@@ -143,12 +142,16 @@ export default function Marketplace() {
             image: ""
           };
           
-          if (storedMetadata) {
-            try {
-              metadata = JSON.parse(storedMetadata);
-            } catch (e) {
-              console.error("Error parsing metadata for trade", i, e);
-            }
+          try {
+            const contractMetadata = await contract.getMetadata(i);
+            metadata = {
+              title: contractMetadata.itemName || `Trade #${i}`,
+              description: contractMetadata.itemDescription || `Listed item for trade`,
+              category: contractMetadata.category || "General",
+              image: ""
+            };
+          } catch (e) {
+            console.error("Error fetching metadata for trade", i, e);
           }
           
           const listing: Listing = {
