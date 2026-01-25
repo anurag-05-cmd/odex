@@ -74,8 +74,17 @@ export default function Navbar() {
             className="relative overflow-hidden text-sm font-medium transition-colors h-5 text-white hover:text-[#70ff00]"
           >
             <span className="inline-block hover:animate-[text-scroll_0.5s_linear]">
-              <span className="block">Listings</span>
-              <span className="block">Listings</span>
+              <span className="block">My Listings</span>
+              <span className="block">My Listings</span>
+            </span>
+          </Link>
+          <Link
+            href="/buyer-trades"
+            className="relative overflow-hidden text-sm font-medium transition-colors h-5 text-white hover:text-[#70ff00]"
+          >
+            <span className="inline-block hover:animate-[text-scroll_0.5s_linear]">
+              <span className="block">My Stakes</span>
+              <span className="block">My Stakes</span>
             </span>
           </Link>
           <Link

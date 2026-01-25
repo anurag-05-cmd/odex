@@ -1,32 +1,44 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { ethers } from "ethers";
+import { create } from '@storacha/client';
+import { CONTRACT_ADDRESS, CONTRACT_ABI, TRADE_STATES, IPFS_GATEWAYS } from "../utils/constants";
 
 interface Listing {
-  id: string;
+  tradeId: string;
   title: string;
   description: string;
   price: string;
   category: string;
-  status: "active" | "sold" | "cancelled";
+  status: "active" | "sold" | "cancelled" | "in_progress" | "can_relist";
   createdAt: string;
   image?: string;
+  ipfsHash?: string;
+  metadataHash?: string;
+  contractState: number;
+}
+
+interface Trade {
+  tradeId: number;
+  seller: string;
+  buyer: string;
+  price: number;
+  sellerStake: number;
+  buyerStake: number;
+  activationTime: number;
+  state: number;
 }
 
 export default function Listings() {
   const [activeTab, setActiveTab] = useState<"dashboard" | "create" | "myListings">("dashboard");
-  const [listings, setListings] = useState<Listing[]>([
-    {
-      id: "1",
-      title: "Gaming Laptop",
-      description: "High-performance gaming laptop with RTX 4070",
-      price: "0.5",
-      category: "Electronics",
-      status: "active",
-      createdAt: "2026-01-20",
-      image: "https://images.unsplash.com/photo-1603302576837-37561b2e2302?w=400",
-    },
-  ]);
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [contract, setContract] = useState<ethers.Contract | null>(null);
+  const [signer, setSigner] = useState<ethers.Signer | null>(null);
+  const [userAddress, setUserAddress] = useState<string>("");
+  const [storageClient, setStorageClient] = useState<any>(null);
+  const [notifications, setNotifications] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
     title: "",
@@ -37,6 +49,280 @@ export default function Listings() {
   });
 
   const [imagePreview, setImagePreview] = useState<string>("");
+
+  // Initialize contract and IPFS client
+  useEffect(() => {
+    initializeContract();
+    initializeStoracha();
+  }, []);
+
+  // Load user's listings when contract is ready
+  useEffect(() => {
+    if (contract && userAddress) {
+      loadUserListings();
+      checkForNotifications();
+    }
+  }, [contract, userAddress]);
+
+  const initializeContract = async () => {
+    try {
+      if (typeof window === 'undefined') {
+        alert("This application requires a browser environment");
+        return;
+      }
+
+      // Wait for ethereum provider to be available (handles ngrok/cross-origin delays)
+      let provider: ethers.BrowserProvider | null = null;
+      let attempts = 0;
+      const maxAttempts = 10;
+
+      while (!provider && attempts < maxAttempts) {
+        if (window.ethereum) {
+          try {
+            provider = new ethers.BrowserProvider(window.ethereum);
+            break;
+          } catch (err) {
+            attempts++;
+            if (attempts < maxAttempts) {
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+          }
+        } else {
+          attempts++;
+          if (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+        }
+      }
+
+      if (!provider) {
+        alert("MetaMask not detected. Please install MetaMask and refresh the page.");
+        return;
+      }
+
+      const accounts = await provider.send("eth_requestAccounts", []);
+      
+      const userSigner = await provider.getSigner();
+      
+      if (!CONTRACT_ADDRESS) {
+        alert("Contract address not configured. Please check your environment variables.");
+        return;
+      }
+      
+      const contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, userSigner);
+      
+      // Test contract connection with retry
+      let tradeCounter: any = null;
+      for (let i = 0; i < 3; i++) {
+        try {
+          tradeCounter = await contractInstance.tradeCounter();
+          break;
+        } catch (testError: any) {
+          if (i < 2) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          } else {
+            throw new Error(`Failed to connect to contract after 3 attempts: ${testError.message}`);
+          }
+        }
+      }
+      
+      setContract(contractInstance);
+      setSigner(userSigner);
+      setUserAddress(accounts[0]);
+      
+    } catch (error: any) {
+      console.error("Error initializing contract:", error);
+      
+      if (error.code === 4001) {
+        alert("Please connect your wallet to continue");
+      } else if (error.code === "NETWORK_ERROR" || error.message?.includes("network")) {
+        alert("Network error. Please check your connection and try again.");
+      } else if (error.message?.includes("could not coalesce")) {
+        alert("Connection issue detected. Please refresh the page and try again.");
+      } else if (error.message?.includes("Failed to connect to contract")) {
+        alert(error.message);
+      } else {
+        alert(`Error: ${error.message || "Unknown error occurred"}`);
+      }
+    }
+  };
+
+  const initializeStoracha = async () => {
+    try {
+      const client = create();
+      setStorageClient(client);
+    } catch (error) {
+      console.error("Error initializing Storacha:", error);
+    }
+  };
+
+  const uploadToIPFS = async (file: File): Promise<string | null> => {
+    if (!storageClient) {
+      return null;
+    }
+    
+    try {
+      const cid = await storageClient.uploadFile(file);
+      return cid.toString();
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const deleteFromIPFS = async (ipfsHash: string): Promise<boolean> => {
+    if (!storageClient) return false;
+    
+    try {
+      await storageClient.remove(ipfsHash);
+      return true;
+    } catch (error) {
+      console.error("Error deleting from IPFS:", error);
+      return false;
+    }
+  };
+
+  const getTradeState = (state: number): { status: Listing['status'], displayText: string } => {
+    switch (state) {
+      case TRADE_STATES.CREATED: return { status: "active", displayText: "Active" };
+      case TRADE_STATES.BUYER_STAKED: return { status: "in_progress", displayText: "Buyer Staked" };
+      case TRADE_STATES.ACTIVE: return { status: "in_progress", displayText: "In Progress" };
+      case TRADE_STATES.RELEASED: return { status: "in_progress", displayText: "Released" };
+      case TRADE_STATES.COMPLETED: return { status: "sold", displayText: "Completed" };
+      case TRADE_STATES.CANCELLED: return { status: "can_relist", displayText: "Can Relist" };
+      default: return { status: "cancelled", displayText: "Cancelled" };
+    }
+  };
+
+  const loadMetadataFromIPFS = async (metadataHash: string): Promise<any> => {
+    if (!storageClient) return null;
+    
+    try {
+      const response = await fetch(`${IPFS_GATEWAYS[0]}${metadataHash}`);
+      const metadata = await response.json();
+      return metadata;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const checkForNotifications = async () => {
+    if (!contract || !userAddress) return;
+    
+    try {
+      const tradeCount = await contract.tradeCounter();
+      const newNotifications: string[] = [];
+      
+      for (let i = 1; i <= tradeCount; i++) {
+        const trade: Trade = await contract.trades(i);
+        const tradeState = Number(trade.state);
+        
+        // Notify seller when buyer has staked
+        if (trade.seller.toLowerCase() === userAddress.toLowerCase() && tradeState === TRADE_STATES.BUYER_STAKED) {
+          newNotifications.push(`Trade #${i}: Buyer has staked! Please deposit your stake to activate the trade.`);
+        }
+        
+        // Notify buyer when seller has staked
+        if (trade.buyer.toLowerCase() === userAddress.toLowerCase() && tradeState === TRADE_STATES.ACTIVE) {
+          newNotifications.push(`Trade #${i}: Seller has staked! Waiting for seller to release item...`);
+        }
+        
+        // Notify buyer when item is released
+        if (trade.buyer.toLowerCase() === userAddress.toLowerCase() && tradeState === TRADE_STATES.RELEASED) {
+          newNotifications.push(`Trade #${i}: Item has been released! Please confirm delivery.`);
+        }
+      }
+      
+      setNotifications(newNotifications);
+    } catch (error) {
+      console.error("Error checking notifications:", error);
+    }
+  };
+
+  const loadUserListings = async () => {
+    if (!contract || !userAddress) return;
+    
+    setLoading(true);
+    try {
+      const tradeCount = await contract.tradeCounter();
+      const userListings: Listing[] = [];
+      
+      for (let i = 1; i <= tradeCount; i++) {
+        const trade: Trade = await contract.trades(i);
+        
+        if (trade.seller.toLowerCase() === userAddress.toLowerCase()) {
+          const tradeState = Number(trade.state);
+          const { status, displayText } = getTradeState(tradeState);
+          
+          // Handle completed trades - auto delete and remove from IPFS
+          if (tradeState === TRADE_STATES.COMPLETED) {
+            // This could be handled with a separate cleanup function
+            // For now, we'll skip showing completed trades
+            continue;
+          }
+          
+          // Try to load metadata from localStorage
+          const storedMetadata = localStorage.getItem(`listing_${i}`);
+          let metadata = {
+            title: `Trade #${i}`,
+            description: `Listed item for trade`,
+            category: "General",
+            image: "",
+            metadataHash: ""
+          };
+          
+          if (storedMetadata) {
+            try {
+              const parsed = JSON.parse(storedMetadata);
+              metadata = { ...metadata, ...parsed };
+            } catch (e) {
+              // Error parsing metadata, continue with defaults
+            }
+          }
+          
+          const listing: Listing = {
+            tradeId: i.toString(),
+            title: metadata.title,
+            description: metadata.description,
+            price: ethers.formatEther(trade.price.toString()),
+            category: metadata.category,
+            status,
+            createdAt: new Date().toISOString().split("T")[0],
+            image: metadata.image,
+            metadataHash: metadata.metadataHash,
+            contractState: tradeState
+          };
+          
+          userListings.push(listing);
+        }
+      }
+      
+      setListings(userListings);
+    } catch (error) {
+      console.error("Error loading listings:", error);
+    }
+    setLoading(false);
+  };
+
+  const handleDeleteCompletedTrade = async (listing: Listing) => {
+    if (listing.contractState !== TRADE_STATES.COMPLETED) return;
+    
+    try {
+      // Delete image from IPFS if exists
+      if (listing.ipfsHash) {
+        await deleteFromIPFS(listing.ipfsHash);
+      }
+      
+      // Delete metadata from IPFS if exists
+      if (listing.metadataHash) {
+        await deleteFromIPFS(listing.metadataHash);
+      }
+      
+      // Remove from local state
+      setListings(listings.filter(l => l.tradeId !== listing.tradeId));
+    } catch (error) {
+      console.error("Error deleting completed trade:", error);
+    }
+  };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -51,24 +337,274 @@ export default function Listings() {
     }
   };
 
-  const handleCreateListing = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Helper function to retry transactions with exponential backoff
+  const sendTransactionWithRetry = async (txFn: () => Promise<any>, maxRetries = 5) => {
+    let lastError: any = null;
     
-    const newListing: Listing = {
-      id: Date.now().toString(),
-      ...formData,
-      status: "active",
-      createdAt: new Date().toISOString().split("T")[0],
-    };
-
-    setListings([...listings, newListing]);
-    setFormData({ title: "", description: "", price: "", category: "", image: "" });
-    setImagePreview("");
-    setActiveTab("myListings");
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const tx = await txFn();
+        return tx;
+      } catch (error: any) {
+        lastError = error;
+        
+        // Check for RPC overload errors
+        if (error.code === -32002 || error.message?.includes("too many errors")) {
+          const waitTime = Math.pow(2, attempt + 1) * 1000; // Exponential backoff: 2s, 4s, 8s, 16s, 32s
+          
+          if (attempt < maxRetries - 1) {
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            continue;
+          }
+        }
+        
+        // For other errors, throw immediately
+        throw error;
+      }
+    }
+    
+    throw new Error(`Transaction failed after ${maxRetries} attempts: ${lastError.message}`);
   };
 
-  const handleCancelListing = (id: string) => {
-    setListings(listings.map(l => l.id === id ? { ...l, status: "cancelled" } : l));
+  const handleCreateListing = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!contract || !signer) {
+      alert("Please connect your wallet");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Convert price to wei
+      const priceInWei = ethers.parseEther(formData.price);
+      
+      // Estimate gas first to catch any contract errors
+      try {
+        const gasEstimate = await contract.createListing.estimateGas(priceInWei);
+      } catch (gasError: any) {
+        throw new Error(`Transaction will fail: ${gasError.reason || gasError.message}`);
+      }
+
+      // Create listing on blockchain with retry
+      const tx = await sendTransactionWithRetry(() => 
+        contract.createListing(priceInWei)
+      );
+      
+      const receipt = await tx.wait();
+
+      // Get the new trade ID from the contract
+      const newTradeId = await contract.tradeCounter();
+      
+      // Store metadata in localStorage for persistence
+      const metadata = {
+        title: formData.title,
+        description: formData.description,
+        category: formData.category,
+        image: formData.image, // base64 for now, will be IPFS hash later
+        createdAt: new Date().toISOString()
+      };
+      
+      localStorage.setItem(`listing_${newTradeId}`, JSON.stringify(metadata));
+
+      alert("Listing created successfully!");
+
+      // Reset form
+      setFormData({ title: "", description: "", price: "", category: "", image: "" });
+      setImagePreview("");
+      setActiveTab("myListings");
+      
+      // Reload listings
+      await loadUserListings();
+      
+    } catch (error: any) {
+      
+      // Check if user rejected
+      if (error.code === 4001 || error.code === "ACTION_REJECTED") {
+        alert("Transaction cancelled by user");
+      } 
+      // Check if error message indicates user rejection
+      else if (error.message && (
+        error.message.includes("user rejected") || 
+        error.message.includes("User denied") ||
+        error.message.includes("rejected the request")
+      )) {
+        alert("Transaction cancelled by user");
+      }
+      // Transaction will fail (from gas estimation)
+      else if (error.message && error.message.includes("Transaction will fail")) {
+        alert(error.message);
+      }
+      // Contract revert
+      else if (error.reason) {
+        alert(`Transaction failed: ${error.reason}`);
+      }
+      // Network or RPC error  
+      else if (error.code === "NETWORK_ERROR" || error.code === -32603) {
+        alert("Network error. Please check your connection and try again.");
+      }
+      // Insufficient funds
+      else if (error.code === "INSUFFICIENT_FUNDS") {
+        alert("Insufficient funds to pay for gas. Please add more ETH to your wallet.");
+      }
+      // Generic error
+      else {
+        alert(`Error: ${error.message || "Unknown error occurred"}`);
+      }
+    }
+    setLoading(false);
+  };
+
+  const handleCancelListing = async (tradeId: string) => {
+    if (!contract) return;
+    
+    setLoading(true);
+    try {
+      // Note: You might need to implement a cancel function in your contract
+      // or handle this through the emergencyWithdrawBuyer function
+      await loadUserListings(); // Refresh listings
+    } catch (error) {
+      console.error("Error cancelling listing:", error);
+    }
+    setLoading(false);
+  };
+
+  const handleReList = async (listing: Listing) => {
+    if (!contract || listing.contractState !== TRADE_STATES.CANCELLED) return;
+    
+    setLoading(true);
+    try {
+      const priceInWei = ethers.parseEther(listing.price);
+      const tx = await sendTransactionWithRetry(() =>
+        contract.createListing(priceInWei)
+      );
+      await tx.wait();
+      
+      await loadUserListings();
+    } catch (error: any) {
+      console.error("Error re-listing:", error);
+      if (error.code === -32002 || error.message?.includes("too many errors")) {
+        alert("RPC endpoint overloaded. Please wait a moment and try again.");
+      } else {
+        alert("Error re-listing item. Please try again.");
+      }
+    }
+    setLoading(false);
+  };
+
+  const handleSellerDeposit = async (listing: Listing) => {
+    if (!contract) return;
+    
+    setLoading(true);
+    try {
+      const priceInWei = ethers.parseEther(listing.price);
+      const stakeAmount = (priceInWei * 3n) / 2n; // Seller stakes 1.5x
+      
+      const tx = await sendTransactionWithRetry(() =>
+        contract.sellerDeposit(listing.tradeId, {
+          value: stakeAmount
+        })
+      );
+      
+      await tx.wait();
+      
+      alert("Successfully staked! Trade is now active. Please release the item within 5 minutes.");
+      await loadUserListings();
+      await checkForNotifications();
+    } catch (error: any) {
+      console.error("Error staking as seller:", error);
+      if (error.code === 4001) {
+        alert("Transaction cancelled");
+      } else if (error.code === -32002 || error.message?.includes("too many errors")) {
+        alert("RPC endpoint overloaded. Please wait a moment and try again.");
+      } else if (error.reason) {
+        alert(`Failed: ${error.reason}`);
+      } else {
+        alert(`Failed to stake: ${error.message || "Please try again."}`);
+      }
+    }
+    setLoading(false);
+  };
+
+  const handleReleaseItem = async (listing: Listing) => {
+    if (!contract) return;
+    
+    setLoading(true);
+    try {
+      const tx = await sendTransactionWithRetry(() =>
+        contract.markItemReleased(listing.tradeId)
+      );
+      
+      await tx.wait();
+      
+      alert("Item released! Waiting for buyer to confirm delivery.");
+      await loadUserListings();
+      await checkForNotifications();
+    } catch (error: any) {
+      console.error("Error releasing item:", error);
+      if (error.code === -32002 || error.message?.includes("too many errors")) {
+        alert("RPC endpoint overloaded. Please wait a moment and try again.");
+      } else if (error.reason) {
+        alert(`Failed: ${error.reason}`);
+      } else {
+        alert(`Failed to release item: ${error.message || "Please try again."}`);
+      }
+    }
+    setLoading(false);
+  };
+
+  const handleConfirmDelivery = async (listing: Listing) => {
+    if (!contract) return;
+    
+    setLoading(true);
+    try {
+      const tx = await sendTransactionWithRetry(() =>
+        contract.confirmDelivery(listing.tradeId)
+      );
+      
+      await tx.wait();
+      
+      alert("Delivery confirmed! Trade completed successfully.");
+      await loadUserListings();
+      await checkForNotifications();
+    } catch (error: any) {
+      console.error("Error confirming delivery:", error);
+      if (error.code === -32002 || error.message?.includes("too many errors")) {
+        alert("RPC endpoint overloaded. Please wait a moment and try again.");
+      } else if (error.reason) {
+        alert(`Failed: ${error.reason}`);
+      } else {
+        alert(`Failed to confirm delivery: ${error.message || "Please try again."}`);
+      }
+    }
+    setLoading(false);
+  };
+
+  const handleRefundTimeout = async (listing: Listing) => {
+    if (!contract) return;
+    
+    setLoading(true);
+    try {
+      const tx = await sendTransactionWithRetry(() =>
+        contract.refundTimeout(listing.tradeId)
+      );
+      
+      await tx.wait();
+      
+      alert("Refund processed due to timeout.");
+      await loadUserListings();
+      await checkForNotifications();
+    } catch (error: any) {
+      console.error("Error requesting refund:", error);
+      if (error.code === -32002 || error.message?.includes("too many errors")) {
+        alert("RPC endpoint overloaded. Please wait a moment and try again.");
+      } else if (error.reason) {
+        alert(`Failed: ${error.reason}`);
+      } else {
+        alert(`Failed to process refund: ${error.message || "Please wait for 5 minutes after seller staked."}`);
+      }
+    }
+    setLoading(false);
   };
 
   const stats = {
@@ -77,6 +613,34 @@ export default function Listings() {
     sold: listings.filter(l => l.status === "sold").length,
     totalVolume: listings.reduce((acc, l) => acc + parseFloat(l.price || "0"), 0).toFixed(2),
   };
+
+  // Auto-refresh listings every 30 seconds to check for state changes
+  useEffect(() => {
+    if (contract && userAddress) {
+      const interval = setInterval(() => {
+        loadUserListings();
+        checkForNotifications();
+      }, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [contract, userAddress]);
+
+  if (!userAddress) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-white mb-4">Connect Your Wallet</h2>
+          <p className="text-gray-400 mb-6">Please connect your wallet to view and manage listings</p>
+          <button
+            onClick={initializeContract}
+            className="px-6 py-3 bg-[#70ff00] text-black rounded-lg font-semibold transition-all duration-300 hover:scale-105"
+          >
+            Connect Wallet
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-black relative overflow-hidden px-6 py-32">
@@ -91,6 +655,20 @@ export default function Listings() {
             My <span className="text-[#70ff00]">Listings</span>
           </h1>
           <p className="text-gray-400">Manage your listings and track your trading activity</p>
+          
+          {/* Notifications */}
+          {notifications.length > 0 && (
+            <div className="mt-4 space-y-2">
+              {notifications.map((notification, index) => (
+                <div key={index} className="bg-[#70ff00]/10 border border-[#70ff00]/30 rounded-lg p-4 flex items-start gap-3">
+                  <svg className="w-5 h-5 text-[#70ff00] flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                  </svg>
+                  <p className="text-[#70ff00] text-sm">{notification}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Tabs */}
@@ -186,7 +764,7 @@ export default function Listings() {
               <h3 className="text-xl font-bold text-white mb-4">Recent Activity</h3>
               <div className="space-y-3">
                 {listings.slice(0, 5).map((listing) => (
-                  <div key={listing.id} className="flex items-center justify-between p-4 bg-black/30 rounded-lg border border-white/5">
+                  <div key={listing.tradeId} className="flex items-center justify-between p-4 bg-black/30 rounded-lg border border-white/5">
                     <div className="flex items-center gap-4">
                       <div className={`w-2 h-2 rounded-full ${listing.status === "active" ? "bg-[#70ff00]" : listing.status === "sold" ? "bg-blue-400" : "bg-gray-500"}`}></div>
                       <div>
@@ -332,9 +910,10 @@ export default function Listings() {
 
                 <button
                   type="submit"
-                  className="w-full px-8 py-4 bg-[#70ff00] text-black rounded-lg font-semibold text-lg transition-all duration-300 hover:shadow-[0_0_40px_rgba(112,255,0,0.4)] hover:scale-[1.02]"
+                  disabled={loading}
+                  className="w-full px-8 py-4 bg-[#70ff00] text-black rounded-lg font-semibold text-lg transition-all duration-300 hover:shadow-[0_0_40px_rgba(112,255,0,0.4)] hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Create Listing
+                  {loading ? "Creating Listing..." : "Create Listing"}
                 </button>
               </form>
             </div>
@@ -344,7 +923,12 @@ export default function Listings() {
         {/* My Listings Tab */}
         {activeTab === "myListings" && (
           <div className="space-y-6">
-            {listings.length === 0 ? (
+            {loading ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#70ff00] mx-auto"></div>
+                <p className="text-gray-400 mt-4">Loading your listings...</p>
+              </div>
+            ) : listings.length === 0 ? (
               <div className="bg-white/[0.02] border border-white/5 rounded-xl p-12 backdrop-blur-sm text-center">
                 <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-4">
                   <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -363,13 +947,25 @@ export default function Listings() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {listings.map((listing) => (
-                  <div key={listing.id} className="bg-white/[0.02] border border-white/5 rounded-xl overflow-hidden backdrop-blur-sm hover:border-[#70ff00]/30 transition-all duration-300">
+                  <div key={listing.tradeId} className="bg-white/[0.02] border border-white/5 rounded-xl overflow-hidden backdrop-blur-sm hover:border-[#70ff00]/30 transition-all duration-300">
                     {listing.image && (
                       <div className="w-full h-48 overflow-hidden bg-black/50">
                         <img 
-                          src={listing.image} 
+                          src={listing.image.startsWith('ipfs://') ? `${IPFS_GATEWAYS[0]}${listing.image.slice(7)}` : listing.image}
                           alt={listing.title}
                           className="w-full h-full object-cover"
+                          onError={(e) => {
+                            // Try fallback IPFS gateways if first one fails
+                            const img = e.target as HTMLImageElement;
+                            if (listing.image?.startsWith('ipfs://')) {
+                              const hash = listing.image.slice(7);
+                              const currentGateway = img.src.split('/ipfs/')[0] + '/ipfs/';
+                              const currentIndex = IPFS_GATEWAYS.indexOf(currentGateway);
+                              if (currentIndex < IPFS_GATEWAYS.length - 1) {
+                                img.src = `${IPFS_GATEWAYS[currentIndex + 1]}${hash}`;
+                              }
+                            }
+                          }}
                         />
                       </div>
                     )}
@@ -380,11 +976,15 @@ export default function Listings() {
                             ? "bg-[#70ff00]/20 text-[#70ff00]" 
                             : listing.status === "sold"
                             ? "bg-blue-500/20 text-blue-400"
+                            : listing.status === "in_progress"
+                            ? "bg-yellow-500/20 text-yellow-400"
+                            : listing.status === "can_relist"
+                            ? "bg-purple-500/20 text-purple-400"
                             : "bg-gray-500/20 text-gray-400"
                         }`}>
-                          {listing.status.toUpperCase()}
+                          {getTradeState(listing.contractState).displayText}
                         </span>
-                        <span className="text-gray-400 text-xs">{listing.createdAt}</span>
+                        <span className="text-gray-400 text-xs">Trade #{listing.tradeId}</span>
                       </div>
                       
                       <h3 className="text-xl font-bold text-white mb-2">{listing.title}</h3>
@@ -395,12 +995,54 @@ export default function Listings() {
                         <span className="text-[#70ff00] font-bold text-lg">{listing.price} ETH</span>
                       </div>
 
-                      {listing.status === "active" && (
+                      {/* Action buttons based on trade state */}
+                      {/* State 0: Created - Waiting for buyer */}
+                      {listing.contractState === TRADE_STATES.CREATED && (
+                        <div className="w-full px-4 py-2 bg-[#70ff00]/10 border border-[#70ff00]/20 text-[#70ff00] rounded-lg font-semibold text-sm text-center">
+                          Waiting for Buyer
+                        </div>
+                      )}
+                      
+                      {/* State 1: Buyer Staked - Seller needs to stake */}
+                      {listing.contractState === TRADE_STATES.BUYER_STAKED && (
                         <button
-                          onClick={() => handleCancelListing(listing.id)}
-                          className="w-full px-4 py-2 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg font-semibold text-sm transition-all duration-300 hover:bg-red-500/20"
+                          onClick={() => handleSellerDeposit(listing)}
+                          disabled={loading}
+                          className="w-full px-4 py-2 bg-[#70ff00] text-black rounded-lg font-semibold text-sm transition-all duration-300 hover:bg-[#70ff00]/80 disabled:opacity-50"
                         >
-                          Cancel Listing
+                          Stake {(parseFloat(listing.price) * 1.5).toFixed(3)} ETH to Activate
+                        </button>
+                      )}
+                      
+                      {/* State 2: Active - Seller needs to release item */}
+                      {listing.contractState === TRADE_STATES.ACTIVE && (
+                        <div className="space-y-2">
+                          <button
+                            onClick={() => handleReleaseItem(listing)}
+                            disabled={loading}
+                            className="w-full px-4 py-2 bg-[#70ff00] text-black rounded-lg font-semibold text-sm transition-all duration-300 hover:bg-[#70ff00]/80 disabled:opacity-50"
+                          >
+                            Release Item
+                          </button>
+                          <p className="text-gray-400 text-xs text-center">Release within 5 minutes or buyer can request refund</p>
+                        </div>
+                      )}
+                      
+                      {/* State 3: Released - Waiting for buyer confirmation */}
+                      {listing.contractState === TRADE_STATES.RELEASED && (
+                        <div className="w-full px-4 py-2 bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 rounded-lg font-semibold text-sm text-center">
+                          Item Released - Waiting for Buyer Confirmation
+                        </div>
+                      )}
+                      
+                      {/* State 5: Cancelled - Can relist */}
+                      {listing.contractState === TRADE_STATES.CANCELLED && (
+                        <button
+                          onClick={() => handleReList(listing)}
+                          disabled={loading}
+                          className="w-full px-4 py-2 bg-[#70ff00]/10 border border-[#70ff00]/20 text-[#70ff00] rounded-lg font-semibold text-sm transition-all duration-300 hover:bg-[#70ff00]/20 disabled:opacity-50"
+                        >
+                          Re-list Item
                         </button>
                       )}
                     </div>

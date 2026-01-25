@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { ethers } from "ethers";
+import { CONTRACT_ADDRESS, CONTRACT_ABI, TRADE_STATES, IPFS_GATEWAYS } from "../utils/constants";
 
 interface Listing {
-  id: string;
+  tradeId: string;
   title: string;
   description: string;
   price: string;
@@ -11,46 +13,274 @@ interface Listing {
   seller: string;
   createdAt: string;
   image?: string;
+  contractState: number;
+}
+
+interface Trade {
+  tradeId: number;
+  seller: string;
+  buyer: string;
+  price: number;
+  sellerStake: number;
+  buyerStake: number;
+  activationTime: number;
+  state: number;
 }
 
 export default function Marketplace() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [contract, setContract] = useState<ethers.Contract | null>(null);
+  const [userAddress, setUserAddress] = useState<string>("");
 
-  // Mock listings data
-  const [listings] = useState<Listing[]>([
-    {
-      id: "1",
-      title: "Gaming Laptop",
-      description: "High-performance gaming laptop with RTX 4070, 32GB RAM, 1TB SSD. Perfect condition, used for 6 months.",
-      price: "0.5",
-      category: "Electronics",
-      seller: "0x1234...5678",
-      createdAt: "2026-01-20",
-      image: "https://images.unsplash.com/photo-1603302576837-37561b2e2302?w=400",
-    },
-    {
-      id: "2",
-      title: "Designer Watch",
-      description: "Luxury Swiss automatic watch with leather strap. Comes with original box and papers.",
-      price: "1.2",
-      category: "Fashion",
-      seller: "0xabcd...efgh",
-      createdAt: "2026-01-22",
-      image: "https://images.unsplash.com/photo-1523170335258-f5ed11844a49?w=400",
-    },
-    {
-      id: "3",
-      title: "Vintage Camera",
-      description: "Rare vintage film camera from the 1970s. Fully functional and well-maintained.",
-      price: "0.3",
-      category: "Collectibles",
-      seller: "0x9876...4321",
-      createdAt: "2026-01-23",
-      image: "https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=400",
-    },
-  ]);
+  // Initialize contract
+  useEffect(() => {
+    initializeContract();
+  }, []);
+
+  // Load marketplace listings when contract is ready
+  useEffect(() => {
+    if (contract) {
+      loadMarketplaceListings();
+      // Refresh every 30 seconds
+      const interval = setInterval(loadMarketplaceListings, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [contract]);
+
+  const initializeContract = async () => {
+    try {
+      if (typeof window === 'undefined') {
+        console.error("Window object not available");
+        return;
+      }
+
+      // Wait for ethereum provider to be available (handles ngrok/cross-origin delays)
+      let provider: ethers.BrowserProvider | null = null;
+      let attempts = 0;
+      const maxAttempts = 10;
+
+      while (!provider && attempts < maxAttempts) {
+        if (window.ethereum) {
+          try {
+            provider = new ethers.BrowserProvider(window.ethereum);
+            console.log("✓ Ethereum provider initialized (Marketplace)");
+            break;
+          } catch (err) {
+            console.log(`Attempt ${attempts + 1}/${maxAttempts}: Provider initialization failed, retrying...`);
+            attempts++;
+            if (attempts < maxAttempts) {
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+          }
+        } else {
+          attempts++;
+          if (attempts < maxAttempts) {
+            console.log(`Attempt ${attempts + 1}/${maxAttempts}: Waiting for window.ethereum...`);
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+        }
+      }
+
+      if (!provider) {
+        console.error("MetaMask not detected");
+        return;
+      }
+      
+      if (!CONTRACT_ADDRESS) {
+        console.error("Contract address not set");
+        return;
+      }
+      
+      // Try to get signer for write operations, fallback to provider for read-only
+      let contractInstance;
+      try {
+        const accounts = await provider.send("eth_requestAccounts", []);
+        const signer = await provider.getSigner();
+        contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+        setUserAddress(accounts[0]);
+        console.log("✓ Connected with signer for write operations");
+      } catch (error: any) {
+        // User rejected connection or ngrok/CORS issue, use read-only
+        console.log("Using read-only mode:", error.message);
+        contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
+      }
+      
+      setContract(contractInstance);
+      console.log("✓ Contract initialized (Marketplace)");
+    } catch (error: any) {
+      console.error("Error initializing contract:", error);
+      if (error.message?.includes("could not coalesce")) {
+        console.error("Cross-origin provider issue detected. Retrying...");
+        setTimeout(initializeContract, 2000);
+      }
+    }
+  };
+
+  const loadMarketplaceListings = async () => {
+    if (!contract) return;
+    
+    setLoading(true);
+    try {
+      const tradeCount = await contract.tradeCounter();
+      const marketplaceListings: Listing[] = [];
+      
+      for (let i = 1; i <= tradeCount; i++) {
+        const trade: Trade = await contract.trades(i);
+        const tradeState = Number(trade.state);
+        
+        // Only show listings that are in "Created" state (available for purchase)
+        if (tradeState === TRADE_STATES.CREATED) {
+          // Try to load metadata from localStorage
+          const storedMetadata = localStorage.getItem(`listing_${i}`);
+          let metadata = {
+            title: `Trade #${i}`,
+            description: `Listed item for trade`,
+            category: "General",
+            image: ""
+          };
+          
+          if (storedMetadata) {
+            try {
+              metadata = JSON.parse(storedMetadata);
+            } catch (e) {
+              console.error("Error parsing metadata for trade", i, e);
+            }
+          }
+          
+          const listing: Listing = {
+            tradeId: i.toString(),
+            title: metadata.title,
+            description: metadata.description,
+            price: ethers.formatEther(trade.price.toString()),
+            category: metadata.category,
+            seller: trade.seller,
+            createdAt: new Date().toISOString().split("T")[0],
+            image: metadata.image,
+            contractState: tradeState
+          };
+          
+          marketplaceListings.push(listing);
+        }
+      }
+      
+      setListings(marketplaceListings);
+    } catch (error) {
+      console.error("Error loading marketplace listings:", error);
+    }
+    setLoading(false);
+  };
+
+  const handleBuyerDeposit = async (listing: Listing) => {
+    if (!contract || !userAddress) {
+      alert("Please connect your wallet first");
+      await initializeContract();
+      return;
+    }
+
+    setLoading(true);
+    
+    // Retry logic for network congestion
+    const sendTransactionWithRetry = async (maxRetries = 3) => {
+      const priceInWei = ethers.parseEther(listing.price);
+      const stakeAmount = priceInWei * 2n; // Buyer stakes 2x the price
+      
+      console.log("=== BUYER DEPOSIT TRANSACTION ===");
+      console.log("Trade ID:", listing.tradeId);
+      console.log("Price in Wei:", priceInWei.toString());
+      console.log("Stake amount (2x):", stakeAmount.toString());
+      console.log("Stake amount in ETH:", ethers.formatEther(stakeAmount));
+      
+      // Check user balance
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const balance = await provider.getBalance(userAddress);
+      const totalBalance = balance + BigInt(0);
+      console.log("Your balance:", ethers.formatEther(totalBalance), "ETH");
+      
+      // Add buffer for gas fees
+      const gasBuffer = ethers.parseEther("0.02"); // Increased buffer for retries
+      const requiredAmount = stakeAmount + gasBuffer;
+      
+      if (totalBalance < requiredAmount) {
+        throw new Error(`INSUFFICIENT_BALANCE: You need ${ethers.formatEther(stakeAmount)} ETH for stake + ${ethers.formatEther(gasBuffer)} ETH for gas. You have ${ethers.formatEther(totalBalance)} ETH`);
+      }
+      
+      let gasLimit = BigInt(100000);
+      try {
+        console.log("Attempting gas estimation...");
+        const estimatedGas = await contract.buyerDeposit.estimateGas(listing.tradeId, {
+          value: stakeAmount
+        });
+        gasLimit = estimatedGas + BigInt(30000); // 30% buffer
+        console.log("Estimated gas:", estimatedGas.toString(), "Gas limit:", gasLimit.toString());
+      } catch (gasError: any) {
+        console.warn("Gas estimation failed, using default:", gasError.message);
+      }
+      
+      // Retry loop
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`\n📤 Attempt ${attempt}/${maxRetries} - Sending transaction...`);
+          const tx = await contract.buyerDeposit(listing.tradeId, {
+            value: stakeAmount,
+            gasLimit: gasLimit
+          });
+          
+          console.log("✅ Transaction sent:", tx.hash);
+          console.log("Waiting for confirmation...");
+          
+          const receipt = await tx.wait();
+          console.log("✅ Transaction confirmed in block:", receipt?.blockNumber);
+          
+          return { success: true, receipt };
+        } catch (error: any) {
+          const isNetworkError = error.code === -32002 || error.message?.includes("too many errors") || error.message?.includes("network");
+          const isLastAttempt = attempt === maxRetries;
+          
+          if (isNetworkError && !isLastAttempt) {
+            const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // Exponential backoff, max 10s
+            console.warn(`⚠️ Network busy (attempt ${attempt}). Retrying in ${waitTime}ms...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            continue; // Retry
+          }
+          
+          throw error; // Not a network error or last attempt, throw it
+        }
+      }
+    };
+    
+    try {
+      const result = await sendTransactionWithRetry(3);
+      
+      if (result.success) {
+        alert("✅ Successfully staked! Waiting for seller to confirm.");
+        await loadMarketplaceListings();
+        setSelectedListing(null);
+      }
+      
+      
+    } catch (error: any) {
+      console.error("=== TRANSACTION ERROR ===", error);
+      
+      if (error.code === 4001 || error.message?.includes("user rejected")) {
+        alert("❌ Transaction cancelled by user");
+      } else if (error.message?.includes("INSUFFICIENT_BALANCE")) {
+        alert("❌ " + error.message.replace("INSUFFICIENT_BALANCE: ", ""));
+      } else if (error.message?.includes("insufficient funds")) {
+        alert("❌ Insufficient funds for gas. Make sure you have enough ETH.");
+      } else if (error.code === -32603 || error.message?.includes("Internal error")) {
+        alert("❌ RPC error. Please refresh the page and try again.");
+      } else if (error.reason) {
+        alert(`❌ Transaction failed: ${error.reason}`);
+      } else {
+        alert(`❌ Transaction failed: ${error.message || "Unknown error"}`);
+      }
+    }
+    setLoading(false);
+  };
 
   const categories = ["all", "Electronics", "Fashion", "Home", "Sports", "Books", "Collectibles", "Other"];
 
@@ -68,6 +298,17 @@ export default function Marketplace() {
   const closeBuyModal = () => {
     setSelectedListing(null);
   };
+
+  if (loading && listings.length === 0) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#70ff00] mx-auto mb-4"></div>
+          <p className="text-gray-400">Loading marketplace...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-black relative overflow-hidden px-6 py-32">
@@ -133,7 +374,12 @@ export default function Marketplace() {
         </div>
 
         {/* Listings Grid */}
-        {filteredListings.length === 0 ? (
+        {loading ? (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#70ff00] mx-auto mb-4"></div>
+            <p className="text-gray-400">Updating listings...</p>
+          </div>
+        ) : filteredListings.length === 0 ? (
           <div className="bg-white/[0.02] border border-white/5 rounded-xl p-12 backdrop-blur-sm text-center">
             <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-4">
               <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -141,16 +387,25 @@ export default function Marketplace() {
               </svg>
             </div>
             <h3 className="text-xl font-semibold text-white mb-2">No listings found</h3>
-            <p className="text-gray-400">Try adjusting your search or filters</p>
+            <p className="text-gray-400">
+              {searchTerm || selectedCategory !== "all" 
+                ? "Try adjusting your search or filters" 
+                : "No active listings available at the moment"}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredListings.map((listing) => (
-              <div key={listing.id} className="bg-white/[0.02] border border-white/5 rounded-xl overflow-hidden backdrop-blur-sm hover:border-[#70ff00]/30 transition-all duration-300 group">
+            {filteredListings.map((listing) => {
+              const imageSrc = listing.image?.startsWith('ipfs://') 
+                ? IPFS_GATEWAYS[0] + listing.image.slice(7)
+                : listing.image;
+              
+              return (
+              <div key={listing.tradeId} className="bg-white/[0.02] border border-white/5 rounded-xl overflow-hidden backdrop-blur-sm hover:border-[#70ff00]/30 transition-all duration-300 group">
                 {listing.image && (
                   <div className="w-full h-48 overflow-hidden bg-black/50 relative">
                     <img 
-                      src={listing.image} 
+                      src={imageSrc}
                       alt={listing.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
@@ -182,9 +437,9 @@ export default function Marketplace() {
                           <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
                         </svg>
                       </div>
-                      <span className="text-gray-400 text-xs font-mono">{listing.seller}</span>
+                      <span className="text-gray-400 text-xs font-mono">{listing.seller.slice(0, 6)}...{listing.seller.slice(-4)}</span>
                     </div>
-                    <span className="text-gray-500 text-xs">{listing.createdAt}</span>
+                    <span className="text-gray-500 text-xs">Trade #{listing.tradeId}</span>
                   </div>
 
                   <button
@@ -195,7 +450,8 @@ export default function Marketplace() {
                   </button>
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
         )}
       </div>
@@ -279,13 +535,12 @@ export default function Marketplace() {
                 </button>
                 <button
                   onClick={() => {
-                    // TODO: Connect to smart contract
-                    alert("Connecting to wallet... This will trigger the buyerDeposit function");
-                    closeBuyModal();
+                    handleBuyerDeposit(selectedListing);
                   }}
-                  className="flex-1 px-6 py-3 bg-[#70ff00] text-black rounded-lg font-semibold transition-all duration-300 hover:shadow-[0_0_40px_rgba(112,255,0,0.4)] hover:scale-[1.02]"
+                  disabled={loading}
+                  className="flex-1 px-6 py-3 bg-[#70ff00] text-black rounded-lg font-semibold transition-all duration-300 hover:shadow-[0_0_40px_rgba(112,255,0,0.4)] hover:scale-[1.02] disabled:opacity-50"
                 >
-                  Confirm & Pay
+                  {loading ? "Processing..." : "Confirm & Pay"}
                 </button>
               </div>
             </div>
