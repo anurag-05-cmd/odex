@@ -4,7 +4,6 @@
   # Odex - Trustless P2P Trading Platform
   
   [![Live Demo](https://img.shields.io/badge/Live-Demo-70ff00?style=for-the-badge&logo=vercel)](https://odex.expose.software)
-  [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
   [![Solidity](https://img.shields.io/badge/Solidity-0.8.19-363636?style=for-the-badge&logo=solidity)](https://soliditylang.org/)
   [![Next.js](https://img.shields.io/badge/Next.js-16.1.4-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
   
@@ -388,11 +387,6 @@ Supported networks (configured in `hardhat.config.ts`):
 - Advanced timeout handling being enhanced
 - Multi-sig capabilities planned
 
-### Audit Status
-🔄 **Not yet audited** - Use at your own risk on mainnet
-
-### Bug Bounty
-Found a security issue? Please responsibly disclose to: security@odex.com
 
 ---
 
@@ -425,22 +419,6 @@ We welcome contributions from the community!
 
 ---
 
-## 📄 License
-
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 📞 Contact & Links
-
-- **Live Platform**: [https://odex.expose.software](https://odex.expose.software)
-- **Documentation**: [Coming Soon]
-- **Twitter**: [@OdexProtocol](https://twitter.com/OdexProtocol)
-- **Discord**: [Join Community](https://discord.gg/odex)
-- **Email**: contact@odex.com
-
----
-
 ## 🙏 Acknowledgments
 
 - Built with ❤️ for DUHacks 5.0
@@ -455,6 +433,6 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
   
   Made with 💚 by the Odex Team
   
-  [Website](https://odex.expose.software) • [GitHub](https://github.com/yourusername/odex) • [Twitter](https://twitter.com/OdexProtocol)
+  [Website](https://odex.expose.software)
   
 </div>
