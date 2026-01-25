@@ -79,7 +79,7 @@ export default function Listings() {
       while (!provider && attempts < maxAttempts) {
         if (window.ethereum) {
           try {
-            provider = new ethers.BrowserProvider(window.ethereum);
+            provider = new ethers.BrowserProvider(window.ethereum as any);
             break;
           } catch (err) {
             attempts++;
@@ -498,7 +498,7 @@ export default function Listings() {
     setLoading(true);
     try {
       const priceInWei = ethers.parseEther(listing.price);
-      const stakeAmount = (priceInWei * 3n) / 2n; // Seller stakes 1.5x
+      const stakeAmount = (priceInWei * BigInt(3)) / BigInt(2); // Seller stakes 1.5x
       
       const tx = await sendTransactionWithRetry(() =>
         contract.sellerDeposit(listing.tradeId, {

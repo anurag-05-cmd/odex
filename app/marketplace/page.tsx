@@ -66,7 +66,7 @@ export default function Marketplace() {
       while (!provider && attempts < maxAttempts) {
         if (window.ethereum) {
           try {
-            provider = new ethers.BrowserProvider(window.ethereum);
+            provider = new ethers.BrowserProvider(window.ethereum as any);
             console.log("✓ Ethereum provider initialized (Marketplace)");
             break;
           } catch (err) {
@@ -186,7 +186,7 @@ export default function Marketplace() {
     // Retry logic for network congestion
     const sendTransactionWithRetry = async (maxRetries = 3) => {
       const priceInWei = ethers.parseEther(listing.price);
-      const stakeAmount = priceInWei * 2n; // Buyer stakes 2x the price
+      const stakeAmount = priceInWei * BigInt(2); // Buyer stakes 2x the price
       
       console.log("=== BUYER DEPOSIT TRANSACTION ===");
       console.log("Trade ID:", listing.tradeId);
@@ -195,7 +195,7 @@ export default function Marketplace() {
       console.log("Stake amount in ETH:", ethers.formatEther(stakeAmount));
       
       // Check user balance
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      const provider = new ethers.BrowserProvider(window.ethereum as any);
       const balance = await provider.getBalance(userAddress);
       const totalBalance = balance + BigInt(0);
       console.log("Your balance:", ethers.formatEther(totalBalance), "ETH");
@@ -255,7 +255,7 @@ export default function Marketplace() {
     try {
       const result = await sendTransactionWithRetry(3);
       
-      if (result.success) {
+      if (result && result.success) {
         alert("✅ Successfully staked! Waiting for seller to confirm.");
         await loadMarketplaceListings();
         setSelectedListing(null);
