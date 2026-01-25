@@ -1,10 +1,10 @@
-import { ethers } from "hardhat";
+import hre from "hardhat";
 
 async function main() {
   console.log("Deploying Odex contract...");
 
   // Deploy the contract
-  const Odex = await ethers.getContractFactory("Odex");
+  const Odex = await hre.ethers.getContractFactory("Odex");
   const odex = await Odex.deploy();
 
   await odex.waitForDeployment();
