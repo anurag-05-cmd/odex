@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, Nabla, Bakbak_One } from "next/font/google";
+import { Space_Grotesk, Nabla, Exo_2 } from "next/font/google";
 import "./globals.css";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
@@ -16,10 +16,10 @@ const nabla = Nabla({
   weight: ["400"],
 });
 
-const bakbakOne = Bakbak_One({
-  variable: "--font-bakbak-one",
+const exo2 = Exo_2({
+  variable: "--font-exo-2",
   subsets: ["latin"],
-  weight: ["400"],
+  weight: ["400", "500", "600", "700", "800"],
 });
 
 export const metadata: Metadata = {
@@ -35,7 +35,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${spaceGrotesk.variable} ${nabla.variable} ${bakbakOne.variable} antialiased bg-black min-h-screen flex flex-col font-sans`}
+        className={`${spaceGrotesk.variable} ${nabla.variable} ${exo2.variable} antialiased bg-black min-h-screen flex flex-col font-sans`}
         style={{ fontFamily: 'var(--font-space-grotesk)' }}
       >
         <Navbar />

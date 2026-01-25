@@ -26,9 +26,9 @@ body {
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-bakbak-one), sans-serif;
+  font-family: var(--font-exo-2), sans-serif;
   letter-spacing: 0.01em;
-  font-weight: 400;
+  font-weight: 600;
   line-height: 1.2;
 }
 
